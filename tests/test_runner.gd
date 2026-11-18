@@ -68,6 +68,8 @@ func _run() -> void:
 	await test_overlay_centered()
 	print("== Steer after idle ==")
 	await test_steer_after_idle()
+	print("== Intro and goal fall ==")
+	await test_intro_and_goal_fall()
 	print("\nRESULT: %d passed, %d failed" % [passed, failed])
 
 
@@ -149,6 +151,7 @@ func test_all_scripts_load() -> void:
 		"res://scripts/visual_theme.gd",
 		"res://scripts/launch_math.gd",
 		"res://scripts/launch_minigame.gd",
+		"res://scripts/launch_intro.gd",
 		"res://scripts/main.gd",
 		"res://scripts/maze_gen.gd",
 		"res://scripts/maze_world.gd",
@@ -334,6 +337,13 @@ func test_main_scene() -> void:
 	check(true, "main scene ran frames without error")
 
 
+func _skip_intro(main: Node) -> void:
+	if main.has_node("LaunchIntroLayer"):
+		main.get_node("LaunchIntroLayer").get_child(0).call("skip")
+	for i in 12:
+		await process_frame
+
+
 func _find_main_child(main: Node, type) -> Node:
 	for c in main.get_children():
 		if is_instance_of(c, type):
@@ -352,6 +362,7 @@ func test_playability_flow() -> void:
 	var top: SpinningTop = _find_main_child(main, SpinningTop) as SpinningTop
 	var maze: MazeWorld = _find_main_child(main, MazeWorld) as MazeWorld
 	check(launch != null and top != null and maze != null, "playability scene parts present")
+	await _skip_intro(main)
 	var rel: float = Launch.power_for_offset(0.0)
 	if main.has_method("_begin_run"):
 		main.call("_begin_run", rel)
@@ -391,8 +402,8 @@ func test_playability_flow() -> void:
 		await physics_frame
 	if int(main.get("phase")) != MainScript.Phase.CLEARED and main.has_method("_on_goal_body"):
 		main.call("_on_goal_body", top)
-		for i in 15:
-			await process_frame
+		for i in 80:
+			await physics_frame
 	check(int(main.get("phase")) == MainScript.Phase.CLEARED, "goal clears wave")
 	if main.has_method("advance_wave"):
 		main.call("advance_wave")
@@ -409,6 +420,41 @@ func test_playability_flow() -> void:
 	check(top.is_fallen(), "playability power zero fell over")
 	if tin.has_method("clear_test_steer_vector"):
 		tin.call("clear_test_steer_vector")
+	inst.queue_free()
+	await process_frame
+
+
+func test_intro_and_goal_fall() -> void:
+	var scene: PackedScene = load("res://scenes/main.tscn")
+	var inst := scene.instantiate()
+	root.add_child(inst)
+	for i in 15:
+		await process_frame
+	var main: Node = inst
+	check(int(main.get("phase")) == MainScript.Phase.INTRO, "intro precedes launch")
+	main.get_node("LaunchIntroLayer").get_child(0).call("skip")
+	for i in 15:
+		await process_frame
+	check(int(main.get("phase")) == MainScript.Phase.LAUNCH, "skip ends intro to launch")
+	main.call("_begin_run", 90.0)
+	for i in 10:
+		await process_frame
+	var top: SpinningTop = _find_main_child(main, SpinningTop) as SpinningTop
+	main.call("_finish_goal", top)
+	await process_frame
+	check(int(main.get("phase")) == MainScript.Phase.GOAL_FALL, "goal enters fall before cleared")
+	for i in 80:
+		await physics_frame
+	check(int(main.get("phase")) == MainScript.Phase.CLEARED, "overlay phase after goal fall")
+	top.set_initial_power(5.0)
+	top.set_run_active(true)
+	main.set("phase", MainScript.Phase.RUN)
+	for i in 150:
+		await physics_frame
+	check(top.spin_power <= 0.1 or top.is_fallen(), "power drains toward fall")
+	for i in 70:
+		await physics_frame
+	check(int(main.get("phase")) == MainScript.Phase.FELL, "power zero leads to fell phase")
 	inst.queue_free()
 	await process_frame
 
@@ -521,20 +567,30 @@ func test_overlay_centered() -> void:
 			await process_frame
 		var top: SpinningTop = _find_main_child(main, SpinningTop) as SpinningTop
 		main.call("_finish_goal", top)
-		for i in 12:
-			await process_frame
+		for i in 80:
+			await physics_frame
 		check(ui.overlay_visible(), "overlay visible at %s" % sz)
 		var vp: Rect2 = inst.get_viewport().get_visible_rect()
 		var card: Rect2 = ui.call("overlay_card_rect") as Rect2
 		var err: float = card.get_center().distance_to(vp.get_center())
 		check(err < 8.0, "overlay cleared centered %dx%d err=%.1f" % [sz.x, sz.y, err])
-		ui.call("on_fell_over")
+		inst.queue_free()
+		await process_frame
+	for sz in [Vector2i(720, 1280), Vector2i(450, 800)]:
+		DisplayServer.window_set_size(sz)
+		var inst2 := scene.instantiate()
+		root.add_child(inst2)
+		for i in 15:
+			await process_frame
+		var ui2: Node = inst2.get_node("UI")
+		ui2.call("on_fell_over")
 		for i in 8:
 			await process_frame
-		card = ui.call("overlay_card_rect") as Rect2
-		err = card.get_center().distance_to(vp.get_center())
-		check(err < 8.0, "overlay fell centered %dx%d err=%.1f" % [sz.x, sz.y, err])
-		inst.queue_free()
+		var vp2: Rect2 = inst2.get_viewport().get_visible_rect()
+		var card2: Rect2 = ui2.call("overlay_card_rect") as Rect2
+		var err2: float = card2.get_center().distance_to(vp2.get_center())
+		check(err2 < 8.0, "overlay fell centered %dx%d err=%.1f" % [sz.x, sz.y, err2])
+		inst2.queue_free()
 		await process_frame
 	DisplayServer.window_set_size(Vector2i(720, 1280))
 
@@ -553,8 +609,8 @@ func test_wave_overlay_flow() -> void:
 	for i in 15:
 		await process_frame
 	main.call("_finish_goal", top)
-	for i in 10:
-		await process_frame
+	for i in 80:
+		await physics_frame
 	check(ui.overlay_visible(), "cleared overlay visible")
 	check(int(main.get("phase")) == MainScript.Phase.CLEARED, "phase cleared")
 	main.call("advance_wave")
@@ -566,8 +622,8 @@ func test_wave_overlay_flow() -> void:
 	for i in 15:
 		await process_frame
 	main.call("_finish_goal", top)
-	for i in 10:
-		await process_frame
+	for i in 80:
+		await physics_frame
 	var ev := InputEventKey.new()
 	ev.pressed = true
 	ev.keycode = KEY_ENTER

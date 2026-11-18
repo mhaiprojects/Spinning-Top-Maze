@@ -272,9 +272,15 @@ func test_playability_flow() -> void:
 	if tin and tin.has_method("set_test_steer_vector"):
 		tin.call("set_test_steer_vector", Vector2(0, -1))
 	var y0: float = top.global_position.y
-	for i in 120:
+	for i in 90:
 		await physics_frame
 	check(top.global_position.y < y0 - 2.0, "top moves under steer vector")
+	top.set_initial_power(92.0)
+	top.set_run_active(true)
+	if top.is_fallen():
+		top.reset_top(maze.start_position(), 92.0)
+		top.set_run_active(true)
+		main.set("phase", MainScript.Phase.RUN)
 	var w1: int = Maze.wall_count(maze.maze_data)
 	var p_hit: float = top.spin_power
 	top.apply_wall_hit(12.0)

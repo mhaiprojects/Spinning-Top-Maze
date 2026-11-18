@@ -5,6 +5,7 @@ const Launch := preload("res://scripts/launch_math.gd")
 const MainScript := preload("res://scripts/main.gd")
 const InputModes := preload("res://scripts/input_modes.gd")
 
+const SETTINGS_TEST := "user://test_stm_screenshot.cfg"
 var _prefix := "/tmp/stm"
 var _flow := false
 
@@ -80,6 +81,11 @@ func _run() -> void:
 	var cfg: Dictionary = _args()
 	_prefix = cfg.prefix
 	_flow = cfg.flow
+	if FileAccess.file_exists(SETTINGS_TEST):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(SETTINGS_TEST))
+	var tin0: Node = root.get_node_or_null("TiltInput")
+	if tin0 and tin0.has_method("set_settings_path"):
+		tin0.call("set_settings_path", SETTINGS_TEST)
 	if _flow:
 		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(_prefix))
 	var scene: PackedScene = load("res://scenes/main.tscn")
@@ -136,15 +142,18 @@ func _run() -> void:
 		top.linear_velocity = Vector2(400, 0)
 		for i in 8:
 			await physics_frame
+		top.wake_for_run()
 		top.apply_wall_hit(90.0, Vector2(10, 0))
 		if main.has_method("apply_screen_shake"):
 			main.call("apply_screen_shake", 1.5)
-		for i in 4:
+		for i in 10:
 			await physics_frame
 		_save("v3_hit.png")
 		for i in 12:
 			await physics_frame
+		top.wake_for_run()
 		top.global_position = maze.goal_area_rect().get_center()
+		top.reset_top(maze.goal_area_rect().get_center(), top.spin_power)
 		main.call("_on_goal_body", top)
 		for i in 35:
 			await physics_frame

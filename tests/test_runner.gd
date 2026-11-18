@@ -17,6 +17,7 @@ var failed := 0
 
 func _initialize() -> void:
 	_clear_settings_test()
+	_bind_test_settings()
 	await _run()
 	_clear_settings_test()
 	quit(1 if failed > 0 else 0)
@@ -25,6 +26,12 @@ func _initialize() -> void:
 func _clear_settings_test() -> void:
 	if FileAccess.file_exists(SETTINGS_TEST):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(SETTINGS_TEST))
+
+
+func _bind_test_settings() -> void:
+	var tin: Node = root.get_node_or_null("TiltInput")
+	if tin and tin.has_method("set_settings_path"):
+		tin.call("set_settings_path", SETTINGS_TEST)
 
 
 func check(cond: bool, name: String) -> void:
@@ -68,6 +75,8 @@ func _run() -> void:
 	await test_overlay_centered()
 	print("== Steer after idle ==")
 	await test_steer_after_idle()
+	print("== Real launch steering ==")
+	await test_real_launch_steering()
 	print("== Intro and goal fall ==")
 	await test_intro_and_goal_fall()
 	print("\nRESULT: %d passed, %d failed" % [passed, failed])
@@ -108,6 +117,10 @@ func test_maze_paths() -> void:
 			check(Maze.has_path(data), "wave %d seed %d path start->goal" % [wave, seed])
 			check(data.start_cell.y == data.rows - 1, "start on bottom row w%d" % wave)
 			check(data.goal_cell.y == 0, "goal on top row w%d" % wave)
+			check(
+				not data.room_walls[data.start_cell.y][data.start_cell.x][Maze.W_N],
+				"start opens north w%d seed %d" % [wave, seed]
+			)
 
 
 func test_density_monotonic() -> void:
@@ -148,6 +161,7 @@ func test_all_scripts_load() -> void:
 		"res://scripts/game_ui.gd",
 		"res://scripts/input_modes.gd",
 		"res://scripts/difficulty.gd",
+		"res://scripts/difficulty_stars.gd",
 		"res://scripts/visual_theme.gd",
 		"res://scripts/launch_math.gd",
 		"res://scripts/launch_minigame.gd",
@@ -420,6 +434,134 @@ func test_playability_flow() -> void:
 	check(top.is_fallen(), "playability power zero fell over")
 	if tin.has_method("clear_test_steer_vector"):
 		tin.call("clear_test_steer_vector")
+	inst.queue_free()
+	await process_frame
+
+
+func _main_key(main: Node, key: Key, pressed: bool) -> void:
+	var e := InputEventKey.new()
+	e.pressed = pressed
+	e.keycode = key
+	Input.parse_input_event(e)
+	main.call("_unhandled_input", e)
+
+
+func _tin_drag(_main: Node, tin: Node, from: Vector2, to: Vector2, steps: int) -> void:
+	var down := InputEventMouseButton.new()
+	down.pressed = true
+	down.button_index = MOUSE_BUTTON_LEFT
+	down.position = from
+	down.global_position = from
+	Input.parse_input_event(down)
+	tin.call("handle_input", down)
+	for j in steps:
+		var t: float = float(j + 1) / float(steps)
+		var p: Vector2 = from.lerp(to, t)
+		var mot := InputEventMouseMotion.new()
+		mot.position = p
+		mot.global_position = p
+		mot.button_mask = MOUSE_BUTTON_MASK_LEFT
+		Input.parse_input_event(mot)
+		tin.call("handle_input", mot)
+		await physics_frame
+	var up := InputEventMouseButton.new()
+	up.pressed = false
+	up.button_index = MOUSE_BUTTON_LEFT
+	up.position = to
+	Input.parse_input_event(up)
+	tin.call("handle_input", up)
+
+
+func test_real_launch_steering() -> void:
+	var scene: PackedScene = load("res://scenes/main.tscn")
+	var inst := scene.instantiate()
+	root.add_child(inst)
+	for i in 20:
+		await process_frame
+	var main: Node = inst
+	check(int(main.get("phase")) == MainScript.Phase.INTRO, "real flow starts at intro")
+	_main_key(main, KEY_SPACE, true)
+	_main_key(main, KEY_SPACE, false)
+	for i in 15:
+		await process_frame
+	check(int(main.get("phase")) == MainScript.Phase.LAUNCH, "space skips intro to launch")
+	_main_key(main, KEY_SPACE, true)
+	_main_key(main, KEY_SPACE, false)
+	for i in 130:
+		await process_frame
+		if int(main.get("phase")) == MainScript.Phase.RUN:
+			break
+	check(int(main.get("phase")) == MainScript.Phase.RUN, "launch release enters run")
+	var top: SpinningTop = _find_main_child(main, SpinningTop) as SpinningTop
+	var maze: MazeWorld = _find_main_child(main, MazeWorld) as MazeWorld
+	check(top.is_run_active(), "run active immediately after launch release")
+	var p_idle: float = top.spin_power
+	for i in 180:
+		await physics_frame
+	check(int(main.get("phase")) == MainScript.Phase.RUN, "still in run after idle")
+	var spawn_p: Vector2 = maze.run_spawn_position()
+	check(top.global_position.distance_to(spawn_p) < 8.0, "top parked at run spawn")
+	check(top.spin_power < p_idle - 0.4, "power decays during idle (%.1f -> %.1f)" % [p_idle, top.spin_power])
+	var y0: float = top.global_position.y
+	check(not top.freeze, "top unfrozen after real launch path")
+	check(not top.is_fallen(), "top not fallen after real launch path")
+	check(top.is_run_active(), "run active flag after real launch path")
+	check(top.collision_layer == 1, "collision layer active after real launch")
+	var tin: Node = root.get_node_or_null("TiltInput")
+	main.set("phase", MainScript.Phase.RUN)
+	main.set("_overlay_busy", false)
+	tin.call("set_steer_blocked", false)
+	tin.call("set_mode", InputModes.Mode.DRAG)
+	y0 = top.global_position.y
+	var down := InputEventMouseButton.new()
+	down.button_index = MOUSE_BUTTON_LEFT
+	down.pressed = true
+	down.position = Vector2(360, 900)
+	Input.parse_input_event(down)
+	tin.call("handle_input", down)
+	for j in 24:
+		var mot := InputEventMouseMotion.new()
+		mot.position = Vector2(360, 680)
+		mot.button_mask = MOUSE_BUTTON_MASK_LEFT
+		Input.parse_input_event(mot)
+		tin.call("handle_input", mot)
+		await physics_frame
+	var drag_dy: float = y0 - top.global_position.y
+	check(
+		drag_dy > 20.0 or top.linear_velocity.length() > 8.0,
+		"drag after real launch moves top up %.1f px vel %.1f"
+		% [drag_dy, top.linear_velocity.length()]
+	)
+	var dup := InputEventMouseButton.new()
+	dup.button_index = MOUSE_BUTTON_LEFT
+	dup.pressed = false
+	dup.position = Vector2(360, 680)
+	Input.parse_input_event(dup)
+	tin.call("handle_input", dup)
+	tin.call("set_mode", InputModes.Mode.KEYBOARD)
+	top.reset_top(maze.start_position(), 95.0)
+	top.set_run_active(true)
+	main.set("phase", MainScript.Phase.RUN)
+	tin.call("set_steer_blocked", false)
+	for i in 60:
+		await physics_frame
+	var kb0: float = top.global_position.y
+	var kdown := InputEventKey.new()
+	kdown.pressed = true
+	kdown.keycode = KEY_UP
+	Input.parse_input_event(kdown)
+	for n in 90:
+		await physics_frame
+	var kup := InputEventKey.new()
+	kup.pressed = false
+	kup.keycode = KEY_UP
+	Input.parse_input_event(kup)
+	var kb_dy: float = kb0 - top.global_position.y
+	check(
+		kb_dy > 20.0 or top.linear_velocity.length() > 8.0,
+		"keyboard up after real launch moves top %.1f px vel %.1f"
+		% [kb_dy, top.linear_velocity.length()]
+	)
 	inst.queue_free()
 	await process_frame
 

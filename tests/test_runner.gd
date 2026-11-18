@@ -5,14 +5,24 @@ const Maze := preload("res://scripts/maze_gen.gd")
 const Launch := preload("res://scripts/launch_math.gd")
 const TopScript := preload("res://scripts/spinning_top.gd")
 const TiltScript := preload("res://scripts/tilt_input.gd")
+const MainScript := preload("res://scripts/main.gd")
+
+const SETTINGS_TEST := "user://test_stm_settings.cfg"
 
 var passed := 0
 var failed := 0
 
 
 func _initialize() -> void:
+	_clear_settings_test()
 	await _run()
+	_clear_settings_test()
 	quit(1 if failed > 0 else 0)
+
+
+func _clear_settings_test() -> void:
+	if FileAccess.file_exists(SETTINGS_TEST):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(SETTINGS_TEST))
 
 
 func check(cond: bool, name: String) -> void:
@@ -34,10 +44,16 @@ func _run() -> void:
 	print("== Top collision power loss ==")
 	await test_top_wall_hit()
 	await test_top_physics_wall_hit()
+	print("== Input modes ==")
+	test_input_mode_logic()
+	test_input_vectors()
+	test_mode_save_load()
 	print("== Tilt keyboard ==")
 	test_tilt_keyboard()
 	print("== Main scene ==")
 	await test_main_scene()
+	print("== Playability flow ==")
+	await test_playability_flow()
 	print("\nRESULT: %d passed, %d failed" % [passed, failed])
 
 
@@ -126,6 +142,46 @@ func test_top_physics_wall_hit() -> void:
 	await process_frame
 
 
+func test_input_mode_logic() -> void:
+	check(InputModes.next_mode(InputModes.Mode.TILT) == InputModes.Mode.MOUSE, "mode cycle wrap tilt->mouse")
+	check(InputModes.next_mode(InputModes.Mode.MOUSE) == InputModes.Mode.KEYBOARD, "mode cycle mouse->keyboard")
+	check(InputModes.next_mode(InputModes.Mode.DRAG) == InputModes.Mode.TILT, "mode cycle drag->tilt")
+	check(InputModes.default_mode(true, true) == InputModes.Mode.TILT, "default touch+sensor tilt")
+	check(InputModes.default_mode(true, false) == InputModes.Mode.DRAG, "default touch no sensor drag")
+	check(InputModes.default_mode(false, true) == InputModes.Mode.MOUSE, "default desktop mouse")
+	check(InputModes.tilt_fallback_mode(true) == InputModes.Mode.DRAG, "tilt fallback touch drag")
+	check(InputModes.tilt_fallback_mode(false) == InputModes.Mode.MOUSE, "tilt fallback desktop mouse")
+
+
+func test_input_vectors() -> void:
+	var m: Vector2 = InputModes.steer_mouse(Vector2(100, 0), Vector2(0, 0))
+	check(m.x > 0.4 and m.length() <= 1.01, "mouse steer toward cursor")
+	check(InputModes.steer_mouse(Vector2(5, 0), Vector2(0, 0)) == Vector2.ZERO, "mouse deadzone")
+	var kb: Vector2 = InputModes.steer_keyboard(true, false, true, false)
+	check(is_equal_approx(kb.length(), 1.0) and kb.x < 0.0 and kb.y < 0.0, "keyboard diagonal normalised")
+	var d: Vector2 = InputModes.steer_drag(Vector2(300, 0), Vector2(100, 0), true)
+	check(is_equal_approx(d.length(), 1.0), "drag clamped to 1")
+	check(InputModes.steer_drag(Vector2(50, 0), Vector2(0, 0), false) == Vector2.ZERO, "drag zero when released")
+	var raw := Vector2(0.5, 0.0)
+	var t: Vector2 = InputModes.steer_tilt(raw, Vector2(0.1, 0.0), raw)
+	check(t.length() > 0.0, "tilt subtracts calibration")
+	var rot: Vector2 = InputModes.rotate_for_screen(Vector2(1, 0), 90.0)
+	check(absf(rot.y) > 0.9, "tilt orientation rotation")
+
+
+func test_mode_save_load() -> void:
+	_clear_settings_test()
+	check(InputModes.save_mode(SETTINGS_TEST, InputModes.Mode.DRAG), "save input mode")
+	check(InputModes.load_mode(SETTINGS_TEST) == InputModes.Mode.DRAG, "load input mode round-trip")
+	var tilt: Node = TiltScript.new()
+	tilt.call("set_settings_path", SETTINGS_TEST)
+	root.add_child(tilt)
+	await process_frame
+	check(int(tilt.call("selected_mode")) == InputModes.Mode.DRAG, "tilt_input restores saved mode")
+	tilt.queue_free()
+	await process_frame
+
+
 func test_tilt_keyboard() -> void:
 	var tilt: Node = TiltScript.new()
 	root.add_child(tilt)
@@ -153,3 +209,68 @@ func test_main_scene() -> void:
 	inst.queue_free()
 	await process_frame
 	check(true, "main scene ran frames without error")
+
+
+func _find_main_child(main: Node, type) -> Node:
+	for c in main.get_children():
+		if is_instance_of(c, type):
+			return c
+	return null
+
+
+func test_playability_flow() -> void:
+	var scene: PackedScene = load("res://scenes/main.tscn")
+	var inst := scene.instantiate()
+	root.add_child(inst)
+	for i in 8:
+		await process_frame
+	var main: Node = inst
+	var launch = _find_main_child(main, LaunchMinigame)
+	var top: SpinningTop = _find_main_child(main, SpinningTop) as SpinningTop
+	var maze: MazeWorld = _find_main_child(main, MazeWorld) as MazeWorld
+	check(launch != null and top != null and maze != null, "playability scene parts present")
+	launch._pos = 0.0
+	var rel: float = Launch.power_for_offset(0.0)
+	if main.has_method("_on_launch_released"):
+		main.call("_on_launch_released", rel)
+	else:
+		launch._pos = 0.0
+		launch.try_release()
+		for i in 120:
+			await process_frame
+			if int(main.get("phase")) == MainScript.Phase.RUN:
+				break
+	check(int(main.get("phase")) == MainScript.Phase.RUN, "launch advances to run")
+	check(top.spin_power > 90.0, "centre launch power ~100 (got %.1f)" % top.spin_power)
+	var tin: Node = root.get_node_or_null("TiltInput")
+	check(tin != null, "TiltInput autoload present for playability")
+	if tin and tin.has_method("set_test_steer_vector"):
+		tin.call("set_test_steer_vector", Vector2(0, -1))
+	var y0: float = top.global_position.y
+	for i in 80:
+		await physics_frame
+	check(top.global_position.y < y0 - 4.0, "top moves under steer vector")
+	var w1: int = Maze.wall_count(maze.maze_data)
+	var p_hit: float = top.spin_power
+	top.apply_wall_hit(12.0)
+	check(top.spin_power < p_hit, "playability wall hit lowers power")
+	top.global_position = maze.goal_area_rect().get_center()
+	for i in 20:
+		await physics_frame
+	if int(main.get("phase")) != MainScript.Phase.CLEARED and main.has_method("_on_goal_body"):
+		main.call("_on_goal_body", top)
+	check(int(main.get("phase")) == MainScript.Phase.CLEARED, "goal clears wave")
+	if main.has_method("advance_wave"):
+		main.call("advance_wave")
+	for i in 10:
+		await process_frame
+	check(int(main.get("wave")) == 2, "wave advances to 2")
+	var w2: int = Maze.wall_count(maze.maze_data)
+	check(w2 >= w1, "wave 2 maze wall_count >= wave 1 (%d vs %d)" % [w2, w1])
+	top.set_initial_power(0.5)
+	top.apply_wall_hit(5.0)
+	check(top.is_fallen(), "playability power zero fell over")
+	if tin.has_method("clear_test_steer_vector"):
+		tin.call("clear_test_steer_vector")
+	inst.queue_free()
+	await process_frame

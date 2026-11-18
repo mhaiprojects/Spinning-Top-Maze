@@ -10,15 +10,12 @@ const W_W := 3
 
 
 static func grid_dims_for_wave(wave: int) -> Vector2i:
-	if wave == 1:
-		return Vector2i(3, 4)
-	var w: int = clampi(2 + wave, 3, 12)
-	var h: int = clampi(3 + wave, 4, 16)
-	return Vector2i(w, h)
+	var p: Dictionary = Difficulty.params_for_wave(wave)
+	return Vector2i(p.cols, p.rows)
 
 
 static func extra_wall_remove_chance(wave: int) -> float:
-	return clampf(0.48 - float(wave) * 0.038, 0.0, 0.48)
+	return float(Difficulty.params_for_wave(wave).extra_wall_remove)
 
 
 static func generate(wave: int, seed_val: int) -> Dictionary:
@@ -86,12 +83,14 @@ static func generate(wave: int, seed_val: int) -> Dictionary:
 		cells.append(row)
 
 	var segments: Array = wall_segments_from_rooms(cols, rows, room_walls)
+	var hazards: Array = _place_hazards(cols, rows, start_cell, goal_cell, room_walls, rng, wave)
 	var data := {
 		"cols": cols,
 		"rows": rows,
 		"cells": cells,
 		"room_walls": room_walls,
 		"walls": segments,
+		"hazards": hazards,
 		"start_cell": start_cell,
 		"goal_cell": goal_cell,
 		"wave": wave,
@@ -174,3 +173,30 @@ static func density(data: Dictionary) -> float:
 
 static func wall_count(data: Dictionary) -> int:
 	return data.walls.size()
+
+
+static func _place_hazards(
+	cols: int,
+	rows: int,
+	start_cell: Vector2i,
+	goal_cell: Vector2i,
+	room_walls: Array,
+	rng: RandomNumberGenerator,
+	wave: int
+) -> Array:
+	var count: int = int(Difficulty.params_for_wave(wave).hazards)
+	if count <= 0:
+		return []
+	var out: Array = []
+	var tries := 0
+	while out.size() < count and tries < count * 40:
+		tries += 1
+		var c := Vector2i(rng.randi_range(0, cols - 1), rng.randi_range(0, rows - 1))
+		if c == start_cell or c == goal_cell:
+			continue
+		if (c - start_cell).length() < 2 or (c - goal_cell).length() < 2:
+			continue
+		if out.has(c):
+			continue
+		out.append(c)
+	return out

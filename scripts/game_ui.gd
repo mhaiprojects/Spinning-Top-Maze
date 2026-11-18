@@ -87,7 +87,6 @@ func _build_overlay() -> void:
 	vb.add_child(_overlay_lbl)
 	_overlay_btn = _btn("Continue", _on_overlay_btn)
 	vb.add_child(_overlay_btn)
-	_overlay_mode = ""
 
 
 var _overlay_mode := ""

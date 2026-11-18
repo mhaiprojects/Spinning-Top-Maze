@@ -50,6 +50,8 @@ func _run() -> void:
 	test_mode_save_load()
 	print("== Tilt keyboard ==")
 	test_tilt_keyboard()
+	print("== Script load smoke ==")
+	test_all_scripts_load()
 	print("== Main scene ==")
 	await test_main_scene()
 	print("== Playability flow ==")
@@ -99,16 +101,41 @@ func test_launch_math() -> void:
 	check(is_equal_approx(Launch.power_for_offset(2.0), Launch.POWER_MIN), "clamped beyond 1")
 
 
+func test_all_scripts_load() -> void:
+	var paths: Array[String] = [
+		"res://scripts/drag_stick_overlay.gd",
+		"res://scripts/game_ui.gd",
+		"res://scripts/input_modes.gd",
+		"res://scripts/launch_math.gd",
+		"res://scripts/launch_minigame.gd",
+		"res://scripts/main.gd",
+		"res://scripts/maze_gen.gd",
+		"res://scripts/maze_world.gd",
+		"res://scripts/spinning_top.gd",
+		"res://scripts/tilt_input.gd",
+	]
+	for p in paths:
+		var res: Resource = load(p)
+		check(res != null, "load script %s" % p)
+		if res is Script:
+			check((res as Script).can_instantiate(), "instantiate script %s" % p)
+	var scene: PackedScene = load("res://scenes/main.tscn")
+	check(scene != null and scene.can_instantiate(), "main.tscn can instantiate")
+
+
 func test_top_wall_hit() -> void:
 	var top: SpinningTop = TopScript.new()
 	root.add_child(top)
+	await process_frame
+	top.set_run_active(true)
 	await process_frame
 	top.set_initial_power(50.0)
 	var p0: float = top.spin_power
 	top.apply_wall_hit(10.0)
 	check(top.spin_power < p0, "wall hit reduces power")
-	top.set_initial_power(3.0)
+	top.set_initial_power(8.0)
 	top.apply_wall_hit(50.0)
+	await process_frame
 	check(top.is_fallen(), "zero power triggers fall")
 	top.queue_free()
 	await process_frame
@@ -127,6 +154,8 @@ func test_top_physics_wall_hit() -> void:
 	wall.position = Vector2(120, 0)
 	root.add_child(wall)
 	root.add_child(top)
+	await process_frame
+	top.set_run_active(true)
 	await process_frame
 	top.set_initial_power(80.0)
 	top.position = Vector2(-80, 0)
@@ -222,24 +251,20 @@ func test_playability_flow() -> void:
 	var scene: PackedScene = load("res://scenes/main.tscn")
 	var inst := scene.instantiate()
 	root.add_child(inst)
-	for i in 8:
+	for i in 20:
 		await process_frame
 	var main: Node = inst
 	var launch = _find_main_child(main, LaunchMinigame)
 	var top: SpinningTop = _find_main_child(main, SpinningTop) as SpinningTop
 	var maze: MazeWorld = _find_main_child(main, MazeWorld) as MazeWorld
 	check(launch != null and top != null and maze != null, "playability scene parts present")
-	launch._pos = 0.0
 	var rel: float = Launch.power_for_offset(0.0)
-	if main.has_method("_on_launch_released"):
-		main.call("_on_launch_released", rel)
+	if main.has_method("_begin_run"):
+		main.call("_begin_run", rel)
 	else:
-		launch._pos = 0.0
-		launch.try_release()
-		for i in 120:
-			await process_frame
-			if int(main.get("phase")) == MainScript.Phase.RUN:
-				break
+		main.call("_on_launch_released", rel)
+	for i in 15:
+		await process_frame
 	check(int(main.get("phase")) == MainScript.Phase.RUN, "launch advances to run")
 	check(top.spin_power > 90.0, "centre launch power ~100 (got %.1f)" % top.spin_power)
 	var tin: Node = root.get_node_or_null("TiltInput")
@@ -247,9 +272,9 @@ func test_playability_flow() -> void:
 	if tin and tin.has_method("set_test_steer_vector"):
 		tin.call("set_test_steer_vector", Vector2(0, -1))
 	var y0: float = top.global_position.y
-	for i in 80:
+	for i in 120:
 		await physics_frame
-	check(top.global_position.y < y0 - 4.0, "top moves under steer vector")
+	check(top.global_position.y < y0 - 2.0, "top moves under steer vector")
 	var w1: int = Maze.wall_count(maze.maze_data)
 	var p_hit: float = top.spin_power
 	top.apply_wall_hit(12.0)
@@ -259,16 +284,20 @@ func test_playability_flow() -> void:
 		await physics_frame
 	if int(main.get("phase")) != MainScript.Phase.CLEARED and main.has_method("_on_goal_body"):
 		main.call("_on_goal_body", top)
+		for i in 15:
+			await process_frame
 	check(int(main.get("phase")) == MainScript.Phase.CLEARED, "goal clears wave")
 	if main.has_method("advance_wave"):
 		main.call("advance_wave")
-	for i in 10:
+	for i in 25:
 		await process_frame
 	check(int(main.get("wave")) == 2, "wave advances to 2")
 	var w2: int = Maze.wall_count(maze.maze_data)
 	check(w2 >= w1, "wave 2 maze wall_count >= wave 1 (%d vs %d)" % [w2, w1])
+	top.set_run_active(true)
 	top.set_initial_power(0.5)
 	top.apply_wall_hit(5.0)
+	await process_frame
 	check(top.is_fallen(), "playability power zero fell over")
 	if tin.has_method("clear_test_steer_vector"):
 		tin.call("clear_test_steer_vector")

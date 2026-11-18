@@ -7,6 +7,7 @@ const TopScript := preload("res://scripts/spinning_top.gd")
 const TiltScript := preload("res://scripts/tilt_input.gd")
 const MainScript := preload("res://scripts/main.gd")
 const Difficulty := preload("res://scripts/difficulty.gd")
+const InputModes := preload("res://scripts/input_modes.gd")
 
 const SETTINGS_TEST := "user://test_stm_settings.cfg"
 
@@ -63,6 +64,8 @@ func _run() -> void:
 	await test_wave_overlay_flow()
 	print("== Overlay centering ==")
 	await test_overlay_centered()
+	print("== Steer after idle ==")
+	await test_steer_after_idle()
 	print("\nRESULT: %d passed, %d failed" % [passed, failed])
 
 
@@ -350,6 +353,95 @@ func test_playability_flow() -> void:
 	check(top.is_fallen(), "playability power zero fell over")
 	if tin.has_method("clear_test_steer_vector"):
 		tin.call("clear_test_steer_vector")
+	inst.queue_free()
+	await process_frame
+
+
+func test_steer_after_idle() -> void:
+	var tin: Node = root.get_node_or_null("TiltInput")
+	check(tin != null, "TiltInput for steer idle tests")
+	var scene: PackedScene = load("res://scenes/main.tscn")
+	var inst := scene.instantiate()
+	root.add_child(inst)
+	for i in 20:
+		await process_frame
+	var main: Node = inst
+	var top: SpinningTop = _find_main_child(main, SpinningTop) as SpinningTop
+	tin.call("set_mode", InputModes.Mode.DRAG)
+	main.call("_begin_run", 95.0)
+	for i in 15:
+		await process_frame
+	var y0: float = top.global_position.y
+	for i in 180:
+		await physics_frame
+	check(not top.sleeping, "top not sleeping after idle on run")
+	var down := InputEventMouseButton.new()
+	down.button_index = MOUSE_BUTTON_LEFT
+	down.pressed = true
+	down.position = Vector2(360, 900)
+	Input.parse_input_event(down)
+	for j in 18:
+		var mot := InputEventMouseMotion.new()
+		mot.position = Vector2(360, 720)
+		mot.button_mask = MOUSE_BUTTON_MASK_LEFT
+		Input.parse_input_event(mot)
+		await physics_frame
+	var drag_moved: bool = top.global_position.y < y0 - 1.5 or top.linear_velocity.length() > 1.5
+	check(drag_moved, "drag steering after idle moves top")
+	var up := InputEventMouseButton.new()
+	up.button_index = MOUSE_BUTTON_LEFT
+	up.pressed = false
+	up.position = Vector2(360, 720)
+	Input.parse_input_event(up)
+	tin.call("handle_input", up)
+	await process_frame
+	check(not bool(tin.call("drag_active")), "drag steer stops after release")
+
+	tin.call("set_mode", InputModes.Mode.MOUSE)
+	top.reset_top(
+		_find_main_child(main, MazeWorld).call("start_position"),
+		95.0
+	)
+	top.set_run_active(true)
+	main.set("phase", MainScript.Phase.RUN)
+	var pos_before: Vector2 = top.global_position
+	for i in 150:
+		await physics_frame
+	check(not top.sleeping, "top not sleeping before mouse steer")
+	var vp: Viewport = inst.get_viewport()
+	var screen_above: Vector2 = vp.get_canvas_transform() * (pos_before + Vector2(0, -160))
+	DisplayServer.warp_mouse(Vector2i(int(screen_above.x), int(screen_above.y)))
+	var mm := InputEventMouseMotion.new()
+	mm.position = screen_above
+	Input.parse_input_event(mm)
+	for k in 70:
+		await physics_frame
+	var mouse_moved: bool = top.global_position.distance_to(pos_before) > 2.0 or top.linear_velocity.length() > 1.0
+	check(mouse_moved, "mouse steering after idle moves top")
+
+	tin.call("set_mode", InputModes.Mode.KEYBOARD)
+	top.reset_top(
+		_find_main_child(main, MazeWorld).call("start_position"),
+		95.0
+	)
+	top.set_run_active(true)
+	var kb0: Vector2 = top.global_position
+	for i in 150:
+		await physics_frame
+	var kdown := InputEventKey.new()
+	kdown.pressed = true
+	kdown.keycode = KEY_UP
+	Input.parse_input_event(kdown)
+	for n in 70:
+		await physics_frame
+	var kup := InputEventKey.new()
+	kup.pressed = false
+	kup.keycode = KEY_UP
+	Input.parse_input_event(kup)
+	check(
+		top.global_position.y < kb0.y - 1.0 or top.linear_velocity.length() > 1.0,
+		"keyboard up after idle moves top"
+	)
 	inst.queue_free()
 	await process_frame
 

@@ -25,6 +25,10 @@ var _drag_pointer := Vector2.ZERO
 var _steer_blocked := false
 var _web_installed := false
 var _test_steer: Variant = null
+var _drag_origin_vp := Vector2.ZERO
+var _drag_pointer_vp := Vector2.ZERO
+var _last_touch_ms := -10000
+var _touch_drag_armed := false
 
 signal mode_changed(selected: int, effective: int)
 signal fallback_message(text: String)
@@ -106,6 +110,12 @@ func _process(delta: float) -> void:
 		_maybe_tilt_fallback(delta)
 	_update_cursor_world()
 	_refresh_effective_from_selection()
+	if _drag_active and _effective_mode == InputModes.Mode.DRAG and not _steer_blocked and not _touch_drag_armed:
+		var vp: Viewport = get_viewport()
+		if vp:
+			_drag_pointer_vp = vp.get_mouse_position()
+			_drag_pointer = _drag_pointer_vp
+			_notify_drag_overlay(true)
 
 
 func _refresh_effective_from_selection() -> void:
@@ -182,7 +192,11 @@ func get_steer_vector() -> Vector2:
 		InputModes.Mode.KEYBOARD:
 			base = Vector2.ZERO
 		InputModes.Mode.DRAG:
-			base = InputModes.steer_drag(_drag_pointer, _drag_origin, _drag_active and not _steer_blocked)
+			base = InputModes.steer_drag(
+				_drag_pointer,
+				_drag_origin,
+				_drag_active and not _steer_blocked
+			)
 		InputModes.Mode.TILT:
 			var oriented: Vector2 = _raw_tilt
 			base = InputModes.steer_tilt(_raw_tilt, _cal_offset, oriented)
@@ -193,6 +207,10 @@ func get_steer_vector() -> Vector2:
 
 func get_tilt_vector() -> Vector2:
 	return get_steer_vector()
+
+
+func drag_active() -> bool:
+	return _drag_active
 
 
 func status_text() -> String:
@@ -211,34 +229,74 @@ func calibrate_zero() -> void:
 	_save_calibration()
 
 
+func _input(event: InputEvent) -> void:
+	handle_input(event)
+
+
+func _event_viewport_pos(event: InputEvent) -> Vector2:
+	if event is InputEventMouse:
+		return (event as InputEventMouse).position
+	if event is InputEventScreenTouch or event is InputEventScreenDrag:
+		return (event as InputEventFromWindow).position
+	return Vector2.ZERO
+
+
+func _is_emulated_mouse_from_touch() -> bool:
+	if not OS.has_feature("web"):
+		return false
+	return Time.get_ticks_msec() - _last_touch_ms < 80
+
+
 func handle_input(event: InputEvent) -> void:
 	if _steer_blocked or _effective_mode != InputModes.Mode.DRAG:
 		return
 
 	if event is InputEventScreenTouch:
+		_last_touch_ms = Time.get_ticks_msec()
+		_touch_drag_armed = true
+		var pos := _event_viewport_pos(event)
 		if event.pressed:
 			_drag_active = true
-			_drag_origin = event.position
-			_drag_pointer = event.position
+			_drag_origin_vp = pos
+			_drag_pointer_vp = pos
+			_drag_origin = pos
+			_drag_pointer = pos
 			_notify_drag_overlay(true)
 		else:
 			_drag_active = false
+			_touch_drag_armed = false
+			_smooth = Vector2.ZERO
 			_notify_drag_overlay(false)
 	elif event is InputEventScreenDrag:
 		if _drag_active:
-			_drag_pointer = event.position
+			var p := _event_viewport_pos(event)
+			_drag_pointer_vp = p
+			_drag_pointer = p
 			_notify_drag_overlay(true)
 	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if _is_emulated_mouse_from_touch():
+			return
+		var pos := _event_viewport_pos(event)
 		if event.pressed:
 			_drag_active = true
-			_drag_origin = event.position
-			_drag_pointer = event.position
+			_touch_drag_armed = false
+			_drag_origin_vp = pos
+			_drag_pointer_vp = pos
+			_drag_origin = pos
+			_drag_pointer = pos
 			_notify_drag_overlay(true)
 		else:
 			_drag_active = false
+			_smooth = Vector2.ZERO
 			_notify_drag_overlay(false)
-	elif event is InputEventMouseMotion and _drag_active and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
-		_drag_pointer = event.position
+	elif event is InputEventMouseMotion:
+		if not _drag_active:
+			return
+		if (event.button_mask & MOUSE_BUTTON_MASK_LEFT) == 0:
+			return
+		var p := _event_viewport_pos(event)
+		_drag_pointer_vp = p
+		_drag_pointer = p
 		_notify_drag_overlay(true)
 
 
@@ -255,8 +313,12 @@ func _update_cursor_world() -> void:
 	var vp: Viewport = get_viewport()
 	if vp == null:
 		return
+	_cursor_world = _viewport_to_world(vp, vp.get_mouse_position())
+
+
+func _viewport_to_world(vp: Viewport, viewport_pos: Vector2) -> Vector2:
 	var canvas: Transform2D = vp.get_canvas_transform()
-	_cursor_world = canvas.affine_inverse() * vp.get_mouse_position()
+	return canvas.affine_inverse() * viewport_pos
 
 
 func _poll_tilt_sources(_delta: float) -> void:
@@ -357,7 +419,7 @@ func _notify_drag_overlay(on: bool) -> void:
 	if stick == null:
 		return
 	if on and stick.has_method("show_stick"):
-		stick.call("show_stick", _drag_origin, _drag_pointer)
+		stick.call("show_stick", _drag_origin_vp, _drag_pointer_vp)
 	elif not on and stick.has_method("hide_stick"):
 		stick.call("hide_stick")
 

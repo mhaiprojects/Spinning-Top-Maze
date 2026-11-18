@@ -29,6 +29,7 @@ func _ready() -> void:
 	gravity_scale = 0.0
 	linear_damp = 2.8
 	angular_damp = 1.5
+	can_sleep = false
 	body_entered.connect(_on_body_entered)
 	lock_rotation = false
 	collision_layer = 1
@@ -74,6 +75,7 @@ func set_run_active(active: bool) -> void:
 		collision_mask = 6
 		set_deferred("contact_monitor", true)
 		freeze = false
+		sleeping = false
 	else:
 		set_deferred("contact_monitor", false)
 		collision_layer = 0
@@ -107,6 +109,8 @@ func _physics_process(delta: float) -> void:
 		tin.call("set_top_world_position", global_position)
 	var tilt: Vector2 = _tilt_vector()
 	if tilt.length_squared() > 0.0001:
+		if sleeping:
+			sleeping = false
 		apply_central_force(tilt * STEER_FORCE * (0.35 + 0.65 * spin_power / 100.0))
 	_wobble_phase += delta * (8.0 + spin_power * 0.12)
 	var spin_rate: float = (spin_power / 100.0) * 24.0

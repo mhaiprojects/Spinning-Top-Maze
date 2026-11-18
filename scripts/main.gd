@@ -91,10 +91,14 @@ func _bootstrap() -> void:
 
 func _process(delta: float) -> void:
 	_update_steer_block()
+	# Only write position while shaking (or when returning to rest once).
+	# Assigning position every frame dirties this Node2D's transform and snaps
+	# the child RigidBody2D top back to its spawn pose: velocity still updates,
+	# but the top never actually moves.
 	if _shake > 0.01:
 		_shake = maxf(0.0, _shake - delta * 8.0)
 		position = _base_position + Vector2(randf_range(-1, 1), randf_range(-1, 1)) * _shake * 6.0
-	else:
+	elif position != _base_position:
 		position = _base_position
 
 

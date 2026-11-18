@@ -257,6 +257,8 @@ func _btn(text: String, cb: Callable) -> Button:
 	b.custom_minimum_size = Vector2(100, BTN_H)
 	b.add_theme_font_size_override("font_size", FONT_SZ)
 	VT.apply_button_theme(b)
+	# Don't steal arrow keys after a HUD click (Board / Input / Pause).
+	b.focus_mode = Control.FOCUS_NONE
 	b.pressed.connect(cb)
 	return b
 

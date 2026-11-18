@@ -9,8 +9,8 @@ signal hit_wall
 const MIN_HIT_LOSS := 4.0
 const HIT_LOSS_SCALE := 1.2
 const STEER_FORCE := 280.0
-const RADIUS := 22.0
-const TRAIL_LEN := 14
+const RADIUS := 40.0
+const TRAIL_LEN := 18
 
 var spin_power: float = 100.0
 var _falling := false
@@ -41,8 +41,8 @@ func _ready() -> void:
 	shape.shape = circle
 	add_child(shape)
 	_trail_line = Line2D.new()
-	_trail_line.width = 4.0
-	_trail_line.default_color = Color(1, 0.75, 0.2, 0.35)
+	_trail_line.width = 7.0
+	_trail_line.default_color = Color(1, 0.65, 0.25, 0.5)
 	_trail_line.joint_mode = Line2D.LINE_JOINT_ROUND
 	add_child(_trail_line)
 	_spark = CPUParticles2D.new()
@@ -126,7 +126,7 @@ func _push_trail() -> void:
 		_trail_line.add_point(to_local(p))
 		i += 1
 	var c: Color = _trail_line.default_color
-	c.a = 0.15 + 0.35 * (spin_power / 100.0)
+	c.a = 0.28 + 0.45 * (spin_power / 100.0)
 	_trail_line.default_color = c
 
 
@@ -209,7 +209,7 @@ func _draw() -> void:
 	draw_circle(Vector2(6, 8), RADIUS * 0.95, Color(0, 0, 0, 0.22))
 	var wobble: float = 0.0
 	if not _falling:
-		wobble = (1.0 - spin_power / 100.0) * 6.0 * sin(_wobble_phase)
+		wobble = (1.0 - spin_power / 100.0) * 11.0 * sin(_wobble_phase)
 	var tilt_draw: float = wobble * 0.03
 	draw_set_transform(Vector2.ZERO, tilt_draw, Vector2.ONE)
 	var body_col := Color(1.0, 0.88, 0.28)

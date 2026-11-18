@@ -1,0 +1,82 @@
+name: Deploy web build to GitHub Pages
+
+# Single-threaded Web export (thread support off) so the game runs on
+# GitHub Pages without COOP/COEP headers.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: deploy-web
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: "4.7.2"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Godot editor and export templates
+        uses: actions/cache@v4
+        with:
+          path: ~/.godot-ci
+          key: godot-${{ env.GODOT_VERSION }}-stable-export-templates
+
+      - name: Install Godot and export templates
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.godot-ci"
+          base="Godot_v${GODOT_VERSION}-stable_linux.x86_64"
+          if [ ! -x "$HOME/.godot-ci/${base}" ]; then
+            curl -L "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/${base}.zip" -o /tmp/godot.zip
+            unzip -qo /tmp/godot.zip -d "$HOME/.godot-ci"
+            chmod +x "$HOME/.godot-ci/${base}"
+          fi
+          sudo ln -sfn "$HOME/.godot-ci/${base}" /usr/local/bin/godot
+          tdir="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          if [ ! -f "$tdir/web_nothreads_release.zip" ]; then
+            if [ ! -f "$HOME/.godot-ci/templates/web_nothreads_release.zip" ]; then
+              curl -L "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_export_templates.tpz" -o /tmp/templates.tpz
+              mkdir -p "$HOME/.godot-ci/templates"
+              unzip -jo /tmp/templates.tpz "templates/version.txt" "templates/web_*" -d "$HOME/.godot-ci/templates"
+            fi
+            mkdir -p "$tdir"
+            cp -a "$HOME/.godot-ci/templates/." "$tdir/"
+          fi
+          godot --headless --version
+
+      - name: Export single-threaded Web build
+        run: |
+          set -euo pipefail
+          mkdir -p build/web
+          godot --headless --path . --import --quit || true
+          godot --headless --path . --export-release "Web" build/web/index.html
+          test -f build/web/index.html
+          test -f build/web/index.wasm
+          test -f build/web/index.pck
+          ls -lh build/web
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4

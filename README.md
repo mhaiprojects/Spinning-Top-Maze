@@ -14,13 +14,33 @@ Top-down maze game for Godot 4.7.2: launch a spinning top with timing skill, ste
 
 ## Controls
 
-| Platform | Steer | Launch | Other |
-|----------|-------|--------|--------|
-| **iOS / Android (native)** | Device accelerometer (after motion permission) | Tap | Calibrate = zero tilt; drag fallback |
-| **Web (iOS 13+)** | Tap **Enable tilt** or first launch tap → `deviceorientation` / `devicemotion` via JS bridge | Tap / click | Safari requires permission gesture |
-| **Desktop** | Arrow keys / WASD; click-drag from touch point | Click / Space | Mouse drag steering |
+### Input modes (pick one primary steer mode)
 
-HUD: **Calibrate**, **Enable tilt** (web), **Pause**, **Retry**, power bar, wave label, tilt status.
+| Mode | How it steers | Best on |
+|------|----------------|---------|
+| **Mouse** | Top is pulled toward the cursor; strength grows with distance (dead zone near the top) | Desktop |
+| **Keyboard** | Arrow keys + WASD | Desktop / all |
+| **Drag** | Touch or hold left mouse and drag (virtual stick); vector clamped to length 1 | Phones, tablets, touch laptops |
+| **Tilt** | Device orientation / accelerometer (web: JS `deviceorientation` / `devicemotion`; native: `Input.get_accelerometer()`) | Phones / tablets |
+
+**Switch mode:** HUD button **Input: … [M]** or press **M** / **Tab** to cycle Mouse → Keyboard → Drag → Tilt. Choice is saved in `user://settings.cfg`.
+
+**Defaults (no saved file):** **Tilt** on mobile / touch Web when sensors are likely available; **Drag** on touch without sensors; **Mouse** on desktop.
+
+**Tilt fallback:** If Tilt is selected but permission is denied or no sensor events arrive within ~1.5 s, a HUD message appears (*“Tilt unavailable — using Drag/Mouse”*). The label still shows **Tilt**; steering uses **Drag** (touch) or **Mouse** (desktop).
+
+**Keyboard override:** Arrow keys / WASD always override the selected mode (documented for accessibility).
+
+**iOS 13+ Web:** Choosing **Tilt** or the first launch tap calls `window.stmRequestTilt()` / `DeviceOrientationEvent.requestPermission()` (must be from a user gesture).
+
+**Calibrate** (Tilt selected): stores current tilt as zero offset.
+
+| Action | Input |
+|--------|--------|
+| Launch release | Tap / click / **Space** (works in every mode; launch taps ignore steering) |
+| Pause / Retry | HUD buttons |
+
+HUD: **Input mode**, **Calibrate** (Tilt), **Pause**, **Retry**, power bar, wave label, status line.
 
 ## Run locally
 
@@ -56,7 +76,9 @@ godot --headless --path . --export-release "Web" build/web/index.html
 | `scripts/launch_minigame.gd` | Pre-run timing mini-game |
 | `scripts/spinning_top.gd` | `RigidBody2D` top, power, wall hits, `_draw()` |
 | `scripts/maze_world.gd` | Wall bodies + maze drawing |
-| `scripts/tilt_input.gd` | Autoload: tilt / web JS / keyboard / drag |
+| `scripts/input_modes.gd` | Pure logic: mode cycle, defaults, steer vectors, save/load |
+| `scripts/tilt_input.gd` | Autoload: four modes + keyboard override / web tilt |
+| `scripts/drag_stick_overlay.gd` | On-screen virtual stick while dragging |
 | `scripts/main.gd` | Wave flow and game phases |
 | `scripts/game_ui.gd` | CanvasLayer HUD and overlays |
 | `tests/test_runner.gd` | Headless test suite |

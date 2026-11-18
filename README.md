@@ -1,6 +1,6 @@
 # Spinning Top Maze
 
-Top-down maze game for Godot 4.7.2: launch a spinning top with timing skill, steer it with device tilt (or keyboard / drag), keep spin power up while navigating procedurally generated mazes wave by wave. All visuals are vector `_draw()` primitives — no image assets.
+Top-down maze game for Godot 4.7.2: launch a spinning top with timing skill, steer it with device tilt (or keyboard / drag), keep spin power up while navigating procedurally generated mazes wave by wave. Visuals are code-generated: vector `_draw()` for entities and HUD, plus cached procedural `ImageTexture` floors for the play area (no downloaded image assets).
 
 **Live:** [mhaiprojects.github.io/Spinning-Top-Maze](https://mhaiprojects.github.io/Spinning-Top-Maze/)  
 **Repo:** [github.com/mhaiprojects/Spinning-Top-Maze](https://github.com/mhaiprojects/Spinning-Top-Maze)
@@ -49,6 +49,19 @@ godot --headless --path . --script res://tests/difficulty_table.gd
 
 **Switch mode:** HUD button **Input: … [M]** or press **M** / **Tab** to cycle Mouse → Keyboard → Drag → Tilt. Choice is saved in `user://settings.cfg`.
 
+### Play-area boards
+
+The maze floor and wall colours follow a selectable **board** theme (procedural texture, cached per size):
+
+| Board | Look |
+|-------|------|
+| **Tabletop** (default) | Warm honey/oak wood grain |
+| **Chopping** | End-grain butcher block with light knife scratches |
+| **Planks** | Long boards with seams and nail heads |
+| **Stone** | Grey carved stone with subtle cracks |
+
+**Switch board:** HUD button **Board: … [B]** or press **B** to cycle Tabletop → Chopping → Planks → Stone. Applies immediately (no wave restart). Stored as `[visual] background = <0–3>` in the same `user://settings.cfg` as input mode (merge save — changing one does not erase the other).
+
 **Defaults (no saved file):** **Tilt** on mobile / touch Web when sensors are likely available; **Drag** on touch without sensors; **Mouse** on desktop.
 
 **Tilt fallback:** If Tilt is selected but permission is denied or no sensor events arrive within ~1.5 s, a HUD message appears (*“Tilt unavailable — using Drag/Mouse”*). The label still shows **Tilt**; steering uses **Drag** (touch) or **Mouse** (desktop).
@@ -64,7 +77,7 @@ godot --headless --path . --script res://tests/difficulty_table.gd
 | Launch release | Tap / click / **Space** (works in every mode; launch taps ignore steering) |
 | Pause / Retry | HUD buttons |
 
-HUD: **Input mode**, **Calibrate** (Tilt), **Pause**, **Retry**, power bar, wave label, status line.
+HUD: **Input mode**, **Board theme**, **Calibrate** (Tilt), **Pause**, **Retry**, power bar, wave label, status line.
 
 ## Run locally
 

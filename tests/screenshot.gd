@@ -4,10 +4,12 @@ extends SceneTree
 const Launch := preload("res://scripts/launch_math.gd")
 const MainScript := preload("res://scripts/main.gd")
 const InputModes := preload("res://scripts/input_modes.gd")
+const PlayBg := preload("res://scripts/play_background.gd")
 
 const SETTINGS_TEST := "user://test_stm_screenshot.cfg"
 var _prefix := "/tmp/stm"
 var _flow := false
+var _bg_flow := false
 
 
 func _initialize() -> void:
@@ -17,12 +19,14 @@ func _initialize() -> void:
 
 func _args() -> Dictionary:
 	var user := OS.get_cmdline_user_args()
-	var out := {"prefix": "/tmp/stm", "flow": false}
+	var out := {"prefix": "/tmp/stm", "flow": false, "bg_flow": false}
 	for a in user:
 		var s := str(a)
 		if s == "--flow":
 			out.flow = true
-		elif s != "--flow" and not s.begins_with("-"):
+		elif s == "--bg-flow":
+			out.bg_flow = true
+		elif not s.begins_with("-"):
 			out.prefix = s
 	return out
 
@@ -77,16 +81,38 @@ func _stitch_grid(names: PackedStringArray, out_name: String, cols: int) -> void
 	print("saved ", out_name)
 
 
+func _run_bg_boards(main: Node, tin: Node) -> void:
+	var files := PackedStringArray([
+		"bg_tabletop.png",
+		"bg_chopping.png",
+		"bg_planks.png",
+		"bg_stone.png",
+	])
+	for i in PlayBg.ORDER.size():
+		var id: int = PlayBg.ORDER[i]
+		if tin and tin.has_method("set_background"):
+			tin.call("set_background", id)
+		for j in 10:
+			await process_frame
+		await _skip_intro(main)
+		main.call("_begin_run", 94.0)
+		for j in 25:
+			await physics_frame
+		_save(files[i])
+	_stitch_grid(files, "bg.png", 2)
+
+
 func _run() -> void:
 	var cfg: Dictionary = _args()
 	_prefix = cfg.prefix
 	_flow = cfg.flow
+	_bg_flow = cfg.bg_flow
 	if FileAccess.file_exists(SETTINGS_TEST):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(SETTINGS_TEST))
 	var tin0: Node = root.get_node_or_null("TiltInput")
 	if tin0 and tin0.has_method("set_settings_path"):
 		tin0.call("set_settings_path", SETTINGS_TEST)
-	if _flow:
+	if _flow or _bg_flow:
 		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(_prefix))
 	var scene: PackedScene = load("res://scenes/main.tscn")
 	var inst := scene.instantiate()
@@ -97,6 +123,10 @@ func _run() -> void:
 	var maze: MazeWorld = _find(inst, MazeWorld) as MazeWorld
 	for i in 15:
 		await process_frame
+	var tin: Node = root.get_node_or_null("TiltInput")
+	if _bg_flow and not _flow:
+		await _run_bg_boards(main, tin)
+		return
 	if not _flow:
 		_save("shot.png")
 		return
@@ -112,7 +142,8 @@ func _run() -> void:
 		await process_frame
 	for i in 120:
 		await physics_frame
-	var tin: Node = root.get_node_or_null("TiltInput")
+	if tin == null:
+		tin = root.get_node_or_null("TiltInput")
 	if tin:
 		tin.call("set_mode", InputModes.Mode.DRAG)
 		if tin.has_method("set_steer_blocked"):

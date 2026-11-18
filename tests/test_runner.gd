@@ -8,6 +8,8 @@ const TiltScript := preload("res://scripts/tilt_input.gd")
 const MainScript := preload("res://scripts/main.gd")
 const Difficulty := preload("res://scripts/difficulty.gd")
 const InputModes := preload("res://scripts/input_modes.gd")
+const PlayBg := preload("res://scripts/play_background.gd")
+const UserSettings := preload("res://scripts/user_settings.gd")
 
 const SETTINGS_TEST := "user://test_stm_settings.cfg"
 
@@ -59,6 +61,9 @@ func _run() -> void:
 	test_input_mode_logic()
 	test_input_vectors()
 	test_mode_save_load()
+	print("== Play backgrounds ==")
+	test_play_backgrounds()
+	await test_play_background_settings()
 	print("== Tilt keyboard ==")
 	test_tilt_keyboard()
 	print("== Script load smoke ==")
@@ -162,6 +167,8 @@ func test_all_scripts_load() -> void:
 		"res://scripts/input_modes.gd",
 		"res://scripts/difficulty.gd",
 		"res://scripts/difficulty_stars.gd",
+		"res://scripts/play_background.gd",
+		"res://scripts/user_settings.gd",
 		"res://scripts/visual_theme.gd",
 		"res://scripts/launch_math.gd",
 		"res://scripts/launch_minigame.gd",
@@ -319,6 +326,41 @@ func test_mode_save_load() -> void:
 	await process_frame
 	check(int(tilt.call("selected_mode")) == InputModes.Mode.DRAG, "tilt_input restores saved mode")
 	tilt.queue_free()
+	await process_frame
+
+
+func test_play_backgrounds() -> void:
+	check(PlayBg.default_id() == PlayBg.Id.TABLETOP, "default tabletop background")
+	var expect: Array[int] = [PlayBg.Id.CHOPPING, PlayBg.Id.PLANKS, PlayBg.Id.STONE, PlayBg.Id.TABLETOP]
+	var id: int = PlayBg.Id.TABLETOP
+	for i in 4:
+		id = PlayBg.next_id(id)
+		check(id == expect[i], "background cycle step %d" % i)
+	for bg in PlayBg.ORDER:
+		var tex: ImageTexture = PlayBg.texture_for_size(bg, Vector2(400, 700))
+		check(tex != null and tex.get_width() > 0, "texture for %s" % PlayBg.name_for(bg))
+
+
+func test_play_background_settings() -> void:
+	_clear_settings_test()
+	check(UserSettings.load_background(SETTINGS_TEST) == PlayBg.Id.TABLETOP, "missing key defaults tabletop")
+	check(UserSettings.save_background(SETTINGS_TEST, PlayBg.Id.PLANKS), "save background")
+	check(UserSettings.load_background(SETTINGS_TEST) == PlayBg.Id.PLANKS, "load background round-trip")
+	check(InputModes.save_mode(SETTINGS_TEST, InputModes.Mode.KEYBOARD), "save mode with bg on file")
+	check(UserSettings.load_background(SETTINGS_TEST) == PlayBg.Id.PLANKS, "bg survives mode save")
+	check(InputModes.load_mode(SETTINGS_TEST) == InputModes.Mode.KEYBOARD, "mode on merged file")
+	check(UserSettings.save_background(SETTINGS_TEST, PlayBg.Id.STONE), "save bg again")
+	check(InputModes.load_mode(SETTINGS_TEST) == InputModes.Mode.KEYBOARD, "mode survives bg save")
+	var maze: MazeWorld = MazeWorld.new()
+	root.add_child(maze)
+	await process_frame
+	var data: Dictionary = Maze.generate(1, 77)
+	var play := Rect2(10, 220, 700, 900)
+	for bg in PlayBg.ORDER:
+		maze.set_play_background(bg)
+		maze.build(data, play)
+		check(maze.play_background_id == bg, "maze theme %s" % PlayBg.name_for(bg))
+	maze.queue_free()
 	await process_frame
 
 

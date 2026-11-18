@@ -104,6 +104,8 @@ func _run() -> void:
 	main.call("_begin_run", power)
 	for i in 12:
 		await process_frame
+	for i in 120:
+		await physics_frame
 	var tin: Node = root.get_node_or_null("TiltInput")
 	if tin:
 		tin.call("set_mode", InputModes.Mode.DRAG)
@@ -125,14 +127,22 @@ func _run() -> void:
 			Input.parse_input_event(mot)
 			await physics_frame
 	_save("v3_gameplay.png")
-	if maze and top:
+	maze = _find(inst, MazeWorld) as MazeWorld
+	top = _find(inst, SpinningTop) as SpinningTop
+	if maze != null and top != null:
+		main.set("phase", MainScript.Phase.RUN)
+		top.set_run_active(true)
 		top.global_position = maze.start_position() + Vector2(15, 0)
 		top.linear_velocity = Vector2(400, 0)
 		for i in 8:
 			await physics_frame
 		top.apply_wall_hit(90.0, Vector2(10, 0))
+		if main.has_method("apply_screen_shake"):
+			main.call("apply_screen_shake", 1.5)
+		for i in 4:
+			await physics_frame
 		_save("v3_hit.png")
-		for i in 10:
+		for i in 12:
 			await physics_frame
 		top.global_position = maze.goal_area_rect().get_center()
 		main.call("_on_goal_body", top)
@@ -148,6 +158,8 @@ func _run() -> void:
 		for i in 200:
 			await physics_frame
 		_save("v3_power0_fall.png")
+	else:
+		push_error("screenshot flow lost maze or top after gameplay")
 	_stitch_grid(
 		PackedStringArray([
 			"v3_intro.png",

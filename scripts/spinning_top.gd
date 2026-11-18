@@ -16,7 +16,8 @@ const HIT_VEL_SCALE := 0.6
 const HIT_COOLDOWN_MS := 150
 const STEER_FORCE := 480.0
 const MAX_LINEAR_SPEED := 520.0
-const RADIUS := 40.0
+const RADIUS := 46.0
+const TRAIL_JUMP := 100.0
 const TRAIL_LEN := 18
 const FALL_ANIM := 1.0
 
@@ -35,6 +36,8 @@ var _hit_mult := 1.0
 var _trail: Array[Vector2] = []
 var _trail_line: Line2D
 var _spark: CPUParticles2D
+var _spark_flash: CPUParticles2D
+var _dbg_tick := 0.0
 
 
 func _ready() -> void:
@@ -57,21 +60,37 @@ func _ready() -> void:
 	_trail_line.width = 7.0
 	_trail_line.default_color = Color(1, 0.65, 0.25, 0.5)
 	_trail_line.joint_mode = Line2D.LINE_JOINT_ROUND
+	_trail_line.z_index = 8
 	add_child(_trail_line)
 	_spark = CPUParticles2D.new()
+	_spark.z_index = 120
 	_spark.emitting = false
 	_spark.one_shot = true
-	_spark.amount = 28
-	_spark.lifetime = 0.32
-	_spark.explosiveness = 0.95
+	_spark.amount = 18
+	_spark.lifetime = 0.35
+	_spark.explosiveness = 1.0
 	_spark.direction = Vector2.ZERO
 	_spark.spread = 180.0
-	_spark.initial_velocity_min = 80.0
-	_spark.initial_velocity_max = 220.0
-	_spark.scale_amount_min = 3.0
-	_spark.scale_amount_max = 6.0
-	_spark.color = Color(1.0, 0.85, 0.35)
+	_spark.initial_velocity_min = 120.0
+	_spark.initial_velocity_max = 280.0
+	_spark.scale_amount_min = 4.0
+	_spark.scale_amount_max = 9.0
+	_spark.color = Color(1.0, 0.95, 0.45)
 	add_child(_spark)
+	_spark_flash = CPUParticles2D.new()
+	_spark_flash.z_index = 121
+	_spark_flash.emitting = false
+	_spark_flash.one_shot = true
+	_spark_flash.amount = 10
+	_spark_flash.lifetime = 0.25
+	_spark_flash.explosiveness = 1.0
+	_spark_flash.direction = Vector2.ZERO
+	_spark_flash.spread = 180.0
+	_spark_flash.initial_velocity_min = 60.0
+	_spark_flash.initial_velocity_max = 140.0
+	_spark_flash.color = Color(1, 1, 1)
+	add_child(_spark_flash)
+	z_index = 10
 	set_run_active(false)
 
 
@@ -82,24 +101,60 @@ func configure_for_wave(wave: int) -> void:
 
 
 func set_run_active(active: bool) -> void:
-	if _fall_kind != FallKind.NONE:
+	if not active and _fall_kind != FallKind.NONE:
 		return
-	_run_active = active
 	if active:
-		collision_layer = 1
-		collision_mask = 6
-		set_deferred("contact_monitor", true)
-		freeze = false
-		sleeping = false
-	else:
-		set_deferred("contact_monitor", false)
-		collision_layer = 0
-		collision_mask = 0
-		freeze = true
-		linear_velocity = Vector2.ZERO
-		angular_velocity = 0.0
-		_trail.clear()
-		_trail_line.clear_points()
+		wake_for_run()
+		return
+	_run_active = false
+	contact_monitor = false
+	collision_layer = 0
+	collision_mask = 0
+	freeze = false
+	sleeping = false
+	linear_velocity = Vector2.ZERO
+	angular_velocity = 0.0
+	_trail.clear()
+	_trail_line.clear_points()
+	_sync_physics_body()
+
+
+func wake_for_run() -> void:
+	_fall_kind = FallKind.NONE
+	_falling = false
+	_fall_t = 0.0
+	_run_active = true
+	collision_layer = 1
+	collision_mask = 6
+	freeze = false
+	sleeping = false
+	contact_monitor = true
+	_trail.clear()
+	_trail_line.clear_points()
+	_sync_physics_body()
+
+
+func _sync_physics_body() -> void:
+	freeze = false
+	linear_velocity = Vector2.ZERO
+	angular_velocity = 0.0
+	reset_physics_interpolation()
+	var xf := global_transform
+	PhysicsServer2D.body_set_state(
+		get_rid(),
+		PhysicsServer2D.BODY_STATE_TRANSFORM,
+		xf
+	)
+	PhysicsServer2D.body_set_state(
+		get_rid(),
+		PhysicsServer2D.BODY_STATE_LINEAR_VELOCITY,
+		Vector2.ZERO
+	)
+	PhysicsServer2D.body_set_state(
+		get_rid(),
+		PhysicsServer2D.BODY_STATE_ANGULAR_VELOCITY,
+		0.0
+	)
 
 
 func set_initial_power(p: float) -> void:
@@ -108,6 +163,7 @@ func set_initial_power(p: float) -> void:
 
 
 func start_goal_victory(target: Vector2) -> void:
+	_clear_trail()
 	_fall_kind = FallKind.GOAL
 	_falling = false
 	_fall_t = 0.0
@@ -125,6 +181,14 @@ func fall_kind() -> int:
 	return int(_fall_kind)
 
 
+func is_run_active() -> bool:
+	return _run_active
+
+
+func sync_physics_state() -> void:
+	_sync_physics_body()
+
+
 func _physics_process(delta: float) -> void:
 	if _fall_kind == FallKind.GOAL:
 		_advance_goal_fall(delta)
@@ -134,6 +198,9 @@ func _physics_process(delta: float) -> void:
 		return
 	if not _run_active:
 		return
+	if _fall_kind == FallKind.NONE and freeze:
+		freeze = false
+		sleeping = false
 	spin_power = maxf(0.0, spin_power - _decay_rate * delta)
 	power_changed.emit(spin_power)
 	if spin_power <= 0.0:
@@ -153,7 +220,26 @@ func _physics_process(delta: float) -> void:
 	var spin_rate: float = (spin_power / 100.0) * 24.0
 	angular_velocity = lerp(angular_velocity, spin_rate, 0.15)
 	_push_trail()
+	_debug_motion(delta)
 	queue_redraw()
+
+
+func _debug_motion(delta: float) -> void:
+	if OS.get_environment("STM_DEBUG") != "1":
+		return
+	_dbg_tick += delta
+	if _dbg_tick < 1.0:
+		return
+	_dbg_tick = 0.0
+	print(
+		"STM top pos=%s freeze=%s sleep=%s vel=%s run=%s fall=%d"
+		% [global_position, freeze, sleeping, linear_velocity, _run_active, _fall_kind]
+	)
+
+
+func _clear_trail() -> void:
+	_trail.clear()
+	_trail_line.clear_points()
 
 
 func _advance_goal_fall(delta: float) -> void:
@@ -185,6 +271,8 @@ func _advance_power_fall(delta: float) -> void:
 
 
 func _push_trail() -> void:
+	if _trail.size() > 0 and global_position.distance_to(_trail.back()) > TRAIL_JUMP:
+		_clear_trail()
 	_trail.push_back(global_position)
 	while _trail.size() > TRAIL_LEN:
 		_trail.pop_front()
@@ -241,6 +329,9 @@ func apply_wall_hit(impact_speed: float, spark_local: Vector2 = Vector2.ZERO) ->
 	_spark.position = spark_local
 	_spark.emitting = true
 	_spark.restart()
+	_spark_flash.position = spark_local
+	_spark_flash.emitting = true
+	_spark_flash.restart()
 	linear_velocity *= HIT_VEL_SCALE
 	hit_wall.emit()
 
@@ -271,12 +362,14 @@ func reset_top(pos: Vector2, power: float) -> void:
 	_falling = false
 	_fall_kind = FallKind.NONE
 	_fall_t = 0.0
+	_clear_trail()
+	spin_power = clampf(power, 0.0, 100.0)
+	freeze = false
+	sleeping = false
 	global_position = pos
 	linear_velocity = Vector2.ZERO
 	angular_velocity = 0.0
-	spin_power = clampf(power, 0.0, 100.0)
-	_trail.clear()
-	_trail_line.clear_points()
+	_sync_physics_body()
 	power_changed.emit(spin_power)
 	queue_redraw()
 
@@ -300,38 +393,39 @@ func _draw() -> void:
 
 
 func _draw_classic_body(spin_ang: float) -> void:
-	var wood_a := Color(0.72, 0.38, 0.14)
-	var wood_b := Color(0.95, 0.62, 0.22)
-	var wood_c := Color(0.55, 0.28, 0.1)
+	var wood_a := Color(0.68, 0.34, 0.12)
+	var wood_b := Color(0.92, 0.58, 0.2)
+	var wood_c := Color(0.48, 0.24, 0.08)
 	var pts := PackedVector2Array([
-		Vector2(-RADIUS * 0.72, -RADIUS * 0.15),
-		Vector2(RADIUS * 0.72, -RADIUS * 0.15),
-		Vector2(RADIUS * 0.38, RADIUS * 0.55),
-		Vector2(0, RADIUS * 0.72),
-		Vector2(-RADIUS * 0.38, RADIUS * 0.55),
+		Vector2(-RADIUS * 0.82, -RADIUS * 0.22),
+		Vector2(RADIUS * 0.82, -RADIUS * 0.22),
+		Vector2(RADIUS * 0.26, RADIUS * 0.48),
+		Vector2(0, RADIUS * 0.78),
+		Vector2(-RADIUS * 0.26, RADIUS * 0.48),
 	])
 	draw_colored_polygon(pts, wood_a)
-	for band_i in 4:
-		var by: float = lerpf(-RADIUS * 0.12, RADIUS * 0.5, float(band_i) / 4.0)
+	for band_i in 5:
+		var by: float = lerpf(-RADIUS * 0.15, RADIUS * 0.55, float(band_i) / 5.0)
 		var col: Color = wood_b if band_i % 2 == 0 else wood_c
-		draw_line(Vector2(-RADIUS * 0.65, by), Vector2(RADIUS * 0.65, by), col, 5.0)
-	var stripe_n := 10
+		var hw: float = lerpf(RADIUS * 0.78, RADIUS * 0.22, float(band_i) / 5.0)
+		draw_line(Vector2(-hw, by), Vector2(hw, by), col, 5.0)
+	var stripe_n := 12
 	for i in stripe_n:
 		var a: float = spin_ang + TAU * float(i) / float(stripe_n)
 		draw_line(
 			Vector2.ZERO,
-			Vector2(cos(a), sin(a)) * RADIUS * 0.62,
-			Color(1, 0.9, 0.55, 0.25),
-			3.0
+			Vector2(cos(a), sin(a)) * RADIUS * 0.55,
+			Color(1, 0.92, 0.55, 0.35),
+			3.5
 		)
-	draw_circle(Vector2(0, -RADIUS * 0.35), RADIUS * 0.2, Color(0.92, 0.88, 0.82))
-	draw_rect(Rect2(-RADIUS * 0.08, -RADIUS * 0.62, RADIUS * 0.16, RADIUS * 0.42), Color(0.75, 0.45, 0.2))
-	draw_circle(Vector2(0, -RADIUS * 0.62), RADIUS * 0.12, Color(0.9, 0.92, 0.95))
-	draw_circle(Vector2(0, RADIUS * 0.64), RADIUS * 0.12, Color(0.55, 0.56, 0.6))
-	draw_circle(Vector2(0, RADIUS * 0.68), RADIUS * 0.05, Color(0.95, 0.95, 1.0))
+	draw_rect(Rect2(-RADIUS * 0.1, -RADIUS * 0.78, RADIUS * 0.2, RADIUS * 0.45), Color(0.78, 0.5, 0.22))
+	draw_circle(Vector2(0, -RADIUS * 0.78), RADIUS * 0.14, Color(0.92, 0.9, 0.88))
+	draw_circle(Vector2(0, -RADIUS * 0.55), RADIUS * 0.22, Color(0.92, 0.88, 0.82))
+	draw_circle(Vector2(0, RADIUS * 0.72), RADIUS * 0.11, Color(0.5, 0.52, 0.58))
+	draw_circle(Vector2(0, RADIUS * 0.76), RADIUS * 0.045, Color(0.95, 0.96, 1.0))
 	var hi := PackedVector2Array([
-		Vector2(-RADIUS * 0.35, -RADIUS * 0.1),
-		Vector2(-RADIUS * 0.05, -RADIUS * 0.22),
-		Vector2(-RADIUS * 0.22, RADIUS * 0.15),
+		Vector2(-RADIUS * 0.4, -RADIUS * 0.12),
+		Vector2(-RADIUS * 0.05, -RADIUS * 0.28),
+		Vector2(-RADIUS * 0.25, RADIUS * 0.2),
 	])
-	draw_colored_polygon(hi, Color(1, 1, 1, 0.18))
+	draw_colored_polygon(hi, Color(1, 1, 1, 0.22))

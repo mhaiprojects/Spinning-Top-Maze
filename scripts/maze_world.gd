@@ -68,6 +68,10 @@ func start_position() -> Vector2:
 	return cell_center(maze_data.start_cell)
 
 
+func run_spawn_position() -> Vector2:
+	return start_position() + Vector2(0, -_cell_size.y * 0.22)
+
+
 func first_wall_body() -> StaticBody2D:
 	for c in get_children():
 		if c is StaticBody2D and c.is_in_group(WALL_GROUP):

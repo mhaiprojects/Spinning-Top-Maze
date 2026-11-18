@@ -174,7 +174,7 @@ func _start_launch() -> void:
 	_generate_maze()
 	_top.visible = false
 	_top.set_run_active(false)
-	_top.global_position = Vector2(-4000, -4000)
+	_park_top_off_maze()
 	_launch.visible = false
 	phase = Phase.INTRO
 	if _ui.has_method("on_phase_intro"):
@@ -186,6 +186,12 @@ func _on_launch_released(power: float) -> void:
 	call_deferred("_begin_run", power)
 
 
+func _park_top_off_maze() -> void:
+	var dock: Vector2 = _play_rect.position + Vector2(_play_rect.size.x * 0.5, _play_rect.end.y + 72)
+	_top.global_position = dock
+	_top.sync_physics_state()
+
+
 func _begin_run(power: float) -> void:
 	_overlay_busy = false
 	phase = Phase.RUN
@@ -194,8 +200,9 @@ func _begin_run(power: float) -> void:
 	_launch.visible = false
 	_launch.cancel()
 	_top.configure_for_wave(wave)
-	_top.reset_top(_maze.start_position(), power)
-	_top.set_run_active(true)
+	_top.reset_top(_maze.run_spawn_position(), power)
+	_top.wake_for_run()
+	_top.call_deferred("sync_physics_state")
 	if _ui.has_method("on_phase_run"):
 		_ui.on_phase_run(wave)
 

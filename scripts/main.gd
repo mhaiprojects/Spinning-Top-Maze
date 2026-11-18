@@ -257,7 +257,7 @@ func _advance_wave_deferred() -> void:
 
 
 func _on_top_hit_wall() -> void:
-	apply_screen_shake(1.0)
+	apply_screen_shake(1.35)
 
 
 func toggle_pause() -> void:

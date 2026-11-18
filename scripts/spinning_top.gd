@@ -6,8 +6,11 @@ signal fell_over
 signal power_changed(value: float)
 signal hit_wall
 
-const MIN_HIT_LOSS := 4.0
-const HIT_LOSS_SCALE := 1.2
+const MIN_HIT_LOSS := 3.0
+const MAX_HIT_POWER_LOSS := 12.0
+const HIT_LOSS_SCALE := 0.22
+const HIT_VEL_SCALE := 0.6
+const HIT_COOLDOWN_MS := 150
 const STEER_FORCE := 480.0
 const MAX_LINEAR_SPEED := 520.0
 const RADIUS := 40.0
@@ -50,15 +53,16 @@ func _ready() -> void:
 	_spark = CPUParticles2D.new()
 	_spark.emitting = false
 	_spark.one_shot = true
-	_spark.amount = 12
-	_spark.lifetime = 0.35
-	_spark.explosiveness = 0.9
+	_spark.amount = 28
+	_spark.lifetime = 0.32
+	_spark.explosiveness = 0.95
 	_spark.direction = Vector2.ZERO
 	_spark.spread = 180.0
-	_spark.initial_velocity_min = 40.0
-	_spark.initial_velocity_max = 120.0
-	_spark.scale_amount_min = 2.0
-	_spark.scale_amount_max = 4.0
+	_spark.initial_velocity_min = 80.0
+	_spark.initial_velocity_max = 220.0
+	_spark.scale_amount_min = 3.0
+	_spark.scale_amount_max = 6.0
+	_spark.color = Color(1.0, 0.85, 0.35)
 	add_child(_spark)
 	set_run_active(false)
 
@@ -160,17 +164,25 @@ func fall_progress() -> float:
 	return clampf(_fall_t / 0.45, 0.0, 1.0)
 
 
-func apply_wall_hit(impact_speed: float) -> void:
+func apply_wall_hit(impact_speed: float, spark_local: Vector2 = Vector2.ZERO) -> void:
 	if not _run_active or _falling:
 		return
-	var loss: float = maxf(MIN_HIT_LOSS, impact_speed * HIT_LOSS_SCALE * _hit_mult)
+	var now: int = Time.get_ticks_msec()
+	if now - _last_hit_ms < HIT_COOLDOWN_MS:
+		return
+	_last_hit_ms = now
+	var loss: float = clampf(
+		impact_speed * HIT_LOSS_SCALE * _hit_mult,
+		MIN_HIT_LOSS,
+		MAX_HIT_POWER_LOSS
+	)
 	spin_power = maxf(0.0, spin_power - loss)
 	power_changed.emit(spin_power)
-	_spark.position = Vector2.ZERO
+	_spark.position = spark_local
 	_spark.emitting = true
+	_spark.restart()
+	linear_velocity *= HIT_VEL_SCALE
 	hit_wall.emit()
-	if spin_power <= 0.0:
-		call_deferred("_begin_fall")
 
 
 func _on_body_entered(body: Node) -> void:
@@ -180,10 +192,6 @@ func _on_body_entered(body: Node) -> void:
 		call_deferred("_apply_wall_hit_deferred", 25.0)
 		return
 	if body is StaticBody2D and body.is_in_group("maze_wall"):
-		var now: int = Time.get_ticks_msec()
-		if now - _last_hit_ms < 120:
-			return
-		_last_hit_ms = now
 		var impact: float = maxf(linear_velocity.length(), 40.0)
 		call_deferred("_apply_wall_hit_deferred", impact)
 

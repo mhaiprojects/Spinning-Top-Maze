@@ -44,6 +44,7 @@ func _run() -> void:
 	print("== Launch power mapping ==")
 	test_launch_math()
 	print("== Top collision power loss ==")
+	test_wall_hit_capped()
 	await test_top_wall_hit()
 	await test_top_physics_wall_hit()
 	await test_top_speed_cap()
@@ -163,6 +164,30 @@ func test_all_scripts_load() -> void:
 	check(scene != null and scene.can_instantiate(), "main.tscn can instantiate")
 
 
+func test_wall_hit_capped() -> void:
+	var top: SpinningTop = TopScript.new()
+	root.add_child(top)
+	await process_frame
+	top.set_run_active(true)
+	top.set_initial_power(100.0)
+	var v0 := Vector2(300, 40)
+	top.linear_velocity = v0
+	top.apply_wall_hit(2000.0)
+	check(top.spin_power >= 88.0, "extreme hit leaves >= 88 power")
+	var p1: float = top.spin_power
+	top.apply_wall_hit(2000.0)
+	check(top.spin_power >= p1 - 0.01, "cooldown blocks stacked hit in same frame")
+	top.set_initial_power(100.0)
+	top.linear_velocity = v0
+	for i in 20:
+		await physics_frame
+	top.apply_wall_hit(80.0)
+	var speed_after: float = top.linear_velocity.length()
+	check(speed_after < v0.length() - 5.0, "wall hit slows velocity")
+	top.queue_free()
+	await process_frame
+
+
 func test_top_wall_hit() -> void:
 	var top: SpinningTop = TopScript.new()
 	root.add_child(top)
@@ -173,10 +198,10 @@ func test_top_wall_hit() -> void:
 	var p0: float = top.spin_power
 	top.apply_wall_hit(10.0)
 	check(top.spin_power < p0, "wall hit reduces power")
-	top.set_initial_power(8.0)
-	top.apply_wall_hit(50.0)
-	await process_frame
-	check(top.is_fallen(), "zero power triggers fall")
+	top.set_initial_power(4.0)
+	for i in 120:
+		await physics_frame
+	check(top.is_fallen() or top.spin_power <= 0.0, "decay to zero triggers fall")
 	top.queue_free()
 	await process_frame
 
@@ -376,10 +401,11 @@ func test_playability_flow() -> void:
 	check(int(main.get("wave")) == 2, "wave advances to 2")
 	var w2: int = Maze.wall_count(maze.maze_data)
 	check(w2 >= w1, "wave 2 maze wall_count >= wave 1 (%d vs %d)" % [w2, w1])
+	top.set_initial_power(3.0)
 	top.set_run_active(true)
-	top.set_initial_power(0.5)
-	top.apply_wall_hit(5.0)
-	await process_frame
+	main.set("phase", MainScript.Phase.RUN)
+	for i in 100:
+		await physics_frame
 	check(top.is_fallen(), "playability power zero fell over")
 	if tin.has_method("clear_test_steer_vector"):
 		tin.call("clear_test_steer_vector")

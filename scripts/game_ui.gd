@@ -1,12 +1,13 @@
 extends CanvasLayer
-## HUD, overlays, input-mode selector, and touch-friendly controls.
+## HUD top band (does not cover the maze).
 
-const BTN_H := 52.0
-const FONT_SZ := 20
+const BTN_H := 64.0
+const FONT_SZ := 22
 
 var _vp_size := Vector2(720, 1280)
 var _play_rect := Rect2()
-var _hud_root: MarginContainer
+var _hud_band: PanelContainer
+var _hud_height := 228.0
 var _power_bar: ProgressBar
 var _lbl_wave: Label
 var _lbl_tilt: Label
@@ -35,33 +36,46 @@ func _ready() -> void:
 	call_deferred("_refresh_mode_button")
 
 
-func set_layout_rects(vp: Vector2, play: Rect2) -> void:
+func set_layout_rects(vp: Vector2, play: Rect2, top_h: float, _bot_h: float) -> void:
 	_vp_size = vp
 	_play_rect = play
+	_hud_height = top_h
+	if _hud_band:
+		_hud_band.offset_bottom = top_h
 
 
 func overlay_visible() -> bool:
 	return _overlay.visible
 
 
+func hud_screen_rect() -> Rect2:
+	if _hud_band == null:
+		return Rect2()
+	return _hud_band.get_global_rect()
+
+
 func consumes_steering_at(screen_pos: Vector2) -> bool:
 	if _overlay.visible:
 		return true
-	if _hud_root == null:
-		return false
-	return _hud_root.get_global_rect().has_point(screen_pos)
+	return hud_screen_rect().has_point(screen_pos)
 
 
 func _build_hud() -> void:
-	_hud_root = MarginContainer.new()
-	_hud_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_hud_root.add_theme_constant_override("margin_left", 12)
-	_hud_root.add_theme_constant_override("margin_right", 12)
-	_hud_root.add_theme_constant_override("margin_top", 8)
-	add_child(_hud_root)
+	_hud_band = PanelContainer.new()
+	_hud_band.name = "HudBand"
+	_hud_band.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	_hud_band.offset_bottom = _hud_height
+	_hud_band.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(_hud_band)
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 12)
+	margin.add_theme_constant_override("margin_right", 12)
+	margin.add_theme_constant_override("margin_top", 6)
+	margin.add_theme_constant_override("margin_bottom", 6)
+	_hud_band.add_child(margin)
 	var v := VBoxContainer.new()
-	v.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_hud_root.add_child(v)
+	v.add_theme_constant_override("separation", 6)
+	margin.add_child(v)
 	_lbl_wave = _label("Wave 1")
 	v.add_child(_lbl_wave)
 	_lbl_tilt = _label("Input: Mouse")
@@ -72,14 +86,14 @@ func _build_hud() -> void:
 	_power_bar = ProgressBar.new()
 	_power_bar.min_value = 0
 	_power_bar.max_value = 100
-	_power_bar.custom_minimum_size = Vector2(200, 22)
+	_power_bar.custom_minimum_size = Vector2(240, 24)
 	_power_bar.show_percentage = false
 	v.add_child(_power_bar)
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 10)
+	row.add_theme_constant_override("separation", 8)
 	v.add_child(row)
 	_btn_mode = _btn("Input: Mouse [M]", _on_cycle_mode)
-	_btn_mode.custom_minimum_size = Vector2(200, BTN_H)
+	_btn_mode.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(_btn_mode)
 	_btn_cal = _btn("Calibrate", _on_calibrate)
 	row.add_child(_btn_cal)
@@ -87,8 +101,6 @@ func _build_hud() -> void:
 	row.add_child(_btn_pause)
 	_btn_retry = _btn("Retry", _on_retry)
 	row.add_child(_btn_retry)
-	var row2 := HBoxContainer.new()
-	v.add_child(row2)
 
 
 func _build_overlay() -> void:
@@ -124,7 +136,7 @@ func _label(text: String) -> Label:
 func _btn(text: String, cb: Callable) -> Button:
 	var b := Button.new()
 	b.text = text
-	b.custom_minimum_size = Vector2(120, BTN_H)
+	b.custom_minimum_size = Vector2(100, BTN_H)
 	b.add_theme_font_size_override("font_size", FONT_SZ)
 	b.pressed.connect(cb)
 	return b
@@ -148,11 +160,12 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func on_phase_launch(w: int) -> void:
-	_lbl_wave.text = "Wave %d — Launch!" % w
+	_lbl_wave.text = "Wave %d — Launch! (Space / tap bar)" % w
 	_hide_overlay()
 
 
-func on_phase_run() -> void:
+func on_phase_run(w: int) -> void:
+	_lbl_wave.text = "Wave %d — Go!" % w
 	_hide_overlay()
 
 

@@ -20,6 +20,7 @@ func setup(bar_rect: Rect2, wave_num: int) -> void:
 	_bar_rect = bar_rect
 	wave = wave_num
 	active = true
+	z_index = 20
 	_pos = 0.0
 	_dir = 1.0
 	_speed = 1.6 + float(wave - 1) * 0.06

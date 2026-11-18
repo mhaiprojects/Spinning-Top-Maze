@@ -11,7 +11,7 @@ var _cell_size := Vector2.ONE
 
 
 func build(data: Dictionary, play_rect: Rect2) -> void:
-	clear_maze()
+	_clear_maze_now()
 	maze_data = data
 	_play_rect = play_rect
 	var cols: int = data.cols
@@ -23,6 +23,10 @@ func build(data: Dictionary, play_rect: Rect2) -> void:
 
 
 func clear_maze() -> void:
+	call_deferred("_clear_maze_now")
+
+
+func _clear_maze_now() -> void:
 	for c in get_children():
 		c.queue_free()
 	maze_data = {}
@@ -39,7 +43,14 @@ func cell_center(cell: Vector2i) -> Vector2:
 func goal_area_rect() -> Rect2:
 	var g: Vector2i = maze_data.goal_cell
 	var c: Vector2 = cell_center(g)
-	var sz: Vector2 = _cell_size * 0.85
+	var sz: Vector2 = _cell_size * 0.72
+	return Rect2(c - sz * 0.5, sz)
+
+
+func start_area_rect() -> Rect2:
+	var s: Vector2i = maze_data.start_cell
+	var c: Vector2 = cell_center(s)
+	var sz: Vector2 = _cell_size * 0.62
 	return Rect2(c - sz * 0.5, sz)
 
 
@@ -73,10 +84,8 @@ func _add_wall_segment(seg: Dictionary) -> void:
 func _draw() -> void:
 	if maze_data.is_empty():
 		return
-	var cols: int = maze_data.cols
-	var rows: int = maze_data.rows
-	draw_rect(_play_rect, Color(0.18, 0.2, 0.24))
-	var wall_col := Color(0.38, 0.42, 0.5)
+	draw_rect(_play_rect, Color(0.16, 0.17, 0.2))
+	var wall_col := Color(0.4, 0.44, 0.52)
 	for seg in maze_data.walls:
 		var a: Vector2 = seg.a
 		var b: Vector2 = seg.b
@@ -88,7 +97,26 @@ func _draw() -> void:
 			var len_v: float = (b.y - a.y) * _cell_size.y
 			draw_rect(Rect2(p0, Vector2(WALL_THICK, len_v)), wall_col)
 	var goal_r: Rect2 = goal_area_rect()
-	draw_rect(goal_r, Color(0.2, 0.65, 0.45, 0.35))
-	draw_rect(goal_r, Color(0.15, 0.55, 0.4), false, 2.0)
-	var start_c: Vector2 = start_position()
-	draw_circle(start_c, minf(_cell_size.x, _cell_size.y) * 0.2, Color(0.45, 0.55, 0.85, 0.5))
+	draw_rect(goal_r, Color(0.12, 0.55, 0.38, 0.55))
+	draw_rect(goal_r, Color(0.1, 0.85, 0.55), false, 3.0)
+	draw_string(
+		ThemeDB.fallback_font,
+		goal_r.position + Vector2(4, goal_r.size.y * 0.55),
+		"GOAL",
+		HORIZONTAL_ALIGNMENT_LEFT,
+		-1,
+		mini(18, int(goal_r.size.x * 0.22)),
+		Color(0.85, 1.0, 0.9)
+	)
+	var start_r: Rect2 = start_area_rect()
+	draw_rect(start_r, Color(0.25, 0.35, 0.55, 0.35))
+	draw_rect(start_r, Color(0.45, 0.6, 0.95), false, 2.0)
+	draw_string(
+		ThemeDB.fallback_font,
+		start_r.position + Vector2(4, start_r.size.y * 0.55),
+		"START",
+		HORIZONTAL_ALIGNMENT_LEFT,
+		-1,
+		mini(16, int(start_r.size.x * 0.2)),
+		Color(0.75, 0.85, 1.0)
+	)

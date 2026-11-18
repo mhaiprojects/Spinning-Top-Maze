@@ -1,50 +1,74 @@
 extends CanvasLayer
-## HUD, overlays, and touch-friendly controls.
+## HUD, overlays, input-mode selector, and touch-friendly controls.
 
 const BTN_H := 52.0
 const FONT_SZ := 20
 
 var _vp_size := Vector2(720, 1280)
 var _play_rect := Rect2()
+var _hud_root: MarginContainer
 var _power_bar: ProgressBar
 var _lbl_wave: Label
 var _lbl_tilt: Label
 var _lbl_msg: Label
 var _btn_cal: Button
-var _btn_tilt: Button
+var _btn_mode: Button
 var _btn_pause: Button
 var _btn_retry: Button
 var _overlay: Control
 var _overlay_lbl: Label
 var _overlay_btn: Button
+var _overlay_mode := ""
 
 
 func _ready() -> void:
 	_build_hud()
 	_build_overlay()
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	var tin: Node = get_node_or_null("/root/TiltInput")
+	if tin:
+		if tin.has_signal("mode_changed"):
+			tin.mode_changed.connect(_on_mode_changed)
+		if tin.has_signal("fallback_message"):
+			tin.fallback_message.connect(_on_fallback_message)
+		_refresh_mode_button()
+	call_deferred("_refresh_mode_button")
 
 
 func set_layout_rects(vp: Vector2, play: Rect2) -> void:
 	_vp_size = vp
 	_play_rect = play
-	_layout_hud()
+
+
+func overlay_visible() -> bool:
+	return _overlay.visible
+
+
+func consumes_steering_at(screen_pos: Vector2) -> bool:
+	if _overlay.visible:
+		return true
+	if _hud_root == null:
+		return false
+	return _hud_root.get_global_rect().has_point(screen_pos)
 
 
 func _build_hud() -> void:
-	var root := MarginContainer.new()
-	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	root.add_theme_constant_override("margin_left", 12)
-	root.add_theme_constant_override("margin_right", 12)
-	root.add_theme_constant_override("margin_top", 8)
-	add_child(root)
+	_hud_root = MarginContainer.new()
+	_hud_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_hud_root.add_theme_constant_override("margin_left", 12)
+	_hud_root.add_theme_constant_override("margin_right", 12)
+	_hud_root.add_theme_constant_override("margin_top", 8)
+	add_child(_hud_root)
 	var v := VBoxContainer.new()
 	v.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	root.add_child(v)
+	_hud_root.add_child(v)
 	_lbl_wave = _label("Wave 1")
 	v.add_child(_lbl_wave)
-	_lbl_tilt = _label("tilt: keyboard")
+	_lbl_tilt = _label("Input: Mouse")
 	v.add_child(_lbl_tilt)
+	_lbl_msg = _label("")
+	_lbl_msg.add_theme_color_override("font_color", Color(1.0, 0.75, 0.35))
+	v.add_child(_lbl_msg)
 	_power_bar = ProgressBar.new()
 	_power_bar.min_value = 0
 	_power_bar.max_value = 100
@@ -54,16 +78,17 @@ func _build_hud() -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 10)
 	v.add_child(row)
+	_btn_mode = _btn("Input: Mouse [M]", _on_cycle_mode)
+	_btn_mode.custom_minimum_size = Vector2(200, BTN_H)
+	row.add_child(_btn_mode)
 	_btn_cal = _btn("Calibrate", _on_calibrate)
 	row.add_child(_btn_cal)
-	_btn_tilt = _btn("Enable tilt", _on_enable_tilt)
-	row.add_child(_btn_tilt)
 	_btn_pause = _btn("Pause", _on_pause)
 	row.add_child(_btn_pause)
 	_btn_retry = _btn("Retry", _on_retry)
 	row.add_child(_btn_retry)
-	if not OS.has_feature("web"):
-		_btn_tilt.visible = false
+	var row2 := HBoxContainer.new()
+	v.add_child(row2)
 
 
 func _build_overlay() -> void:
@@ -89,9 +114,6 @@ func _build_overlay() -> void:
 	vb.add_child(_overlay_btn)
 
 
-var _overlay_mode := ""
-
-
 func _label(text: String) -> Label:
 	var l := Label.new()
 	l.text = text
@@ -108,24 +130,26 @@ func _btn(text: String, cb: Callable) -> Button:
 	return b
 
 
-func _layout_hud() -> void:
-	pass
-
-
 func _process(_delta: float) -> void:
-	var tilt: Node = get_node_or_null("/root/TiltInput")
-	if tilt and tilt.has_method("status_text"):
-		_lbl_tilt.text = tilt.call("status_text")
+	var tin: Node = get_node_or_null("/root/TiltInput")
+	if tin and tin.has_method("status_text"):
+		_lbl_tilt.text = tin.call("status_text")
 	for c in get_parent().get_children():
 		if c is SpinningTop:
 			_power_bar.value = (c as SpinningTop).spin_power
 			break
 
 
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_M or event.keycode == KEY_TAB:
+			_cycle_mode()
+			get_viewport().set_input_as_handled()
+
+
 func on_phase_launch(w: int) -> void:
 	_lbl_wave.text = "Wave %d — Launch!" % w
 	_hide_overlay()
-	get_tree().paused = false
 
 
 func on_phase_run() -> void:
@@ -152,16 +176,43 @@ func _hide_overlay() -> void:
 	_overlay_mode = ""
 
 
+func _on_cycle_mode() -> void:
+	_cycle_mode()
+
+
+func _cycle_mode() -> void:
+	var tin: Node = get_node_or_null("/root/TiltInput")
+	if tin and tin.has_method("cycle_mode"):
+		tin.call("cycle_mode")
+	_refresh_mode_button()
+
+
+func _on_mode_changed(_selected: int, _effective: int) -> void:
+	_refresh_mode_button()
+
+
+func _on_fallback_message(text: String) -> void:
+	_lbl_msg.text = text
+
+
+func _refresh_mode_button() -> void:
+	var tin: Node = get_node_or_null("/root/TiltInput")
+	if tin == null:
+		return
+	var name: String = "Mouse"
+	if tin.has_method("status_text"):
+		var st: String = tin.call("status_text")
+		if st.begins_with("Input: "):
+			name = st.split(" ")[1].trim_suffix("(on)").trim_suffix("(denied)")
+	var mode_word: String = name.split("(")[0].strip_edges()
+	_btn_mode.text = "Input: %s [M]" % mode_word
+	_btn_cal.visible = tin.has_method("selected_mode") and int(tin.call("selected_mode")) == InputModes.Mode.TILT
+
+
 func _on_calibrate() -> void:
 	var t: Node = get_node_or_null("/root/TiltInput")
 	if t and t.has_method("calibrate_zero"):
 		t.call("calibrate_zero")
-
-
-func _on_enable_tilt() -> void:
-	var t: Node = get_node_or_null("/root/TiltInput")
-	if t and t.has_method("request_web_permission"):
-		t.call("request_web_permission")
 
 
 func _on_pause() -> void:
@@ -189,5 +240,5 @@ func _on_overlay_btn() -> void:
 
 
 func forward_input(event: InputEvent) -> void:
-	if _overlay.visible and event is InputEventScreenTouch and event.pressed:
+	if _overlay.visible:
 		return

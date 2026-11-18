@@ -10,7 +10,31 @@ Top-down maze game for Godot 4.7.2: launch a spinning top with timing skill, ste
 1. **Launch** — A marker slides along a bar. Tap, click, or press Space when it is near the centre for maximum starting spin (100). Edges give minimum power (~25).
 2. **Steer** — Tilt your phone or use keyboard / drag so the top is pushed through corridors toward the green goal pad at the top of the maze.
 3. **Spin power** — Drains slowly and drops on wall hits. At 0 the top falls over; choose **Retry** to replay the wave (launch mini-game again).
-4. **Goal** — Reach the landing pad to clear the wave. The next wave uses a denser maze, then launch again.
+4. **Goal** — Reach the landing pad to clear the wave. A **Wave N cleared!** overlay appears with **Next Wave** (click/tap, **Space**, or **Enter**). The next wave uses a larger, denser maze and the launch mini-game again.
+5. **Fell over** — **Retry** on the overlay restarts the **same** wave number with a **new maze seed** (launch mini-game again).
+
+## Difficulty ramp
+
+Wave parameters are centralized in `scripts/difficulty.gd` (`params_for_wave`). Wave 1 stays easy; grid size, wall density, spin decay, launch marker speed, sweet-spot width, wall-hit loss, and optional maze hazards all ramp with the wave (capped for 720×1280 portrait). The HUD shows **Wave N** and a star rating.
+
+Regenerate this table:
+
+```bash
+godot --headless --path . --script res://tests/difficulty_table.gd
+```
+
+| Wave | Grid | Cells | Hit mult | Decay | Marker spd | Sweet spot | Hazards | Label |
+|------|------|-------|----------|-------|------------|------------|-----------|-------|
+| 1 | 3x4 | 12 | 1.00 | 2.20 | 1.45 | 20% | 0 | Easy |
+| 2 | 3x5 | 15 | 1.06 | 2.32 | 1.53 | 19% | 0 | Easy+ |
+| 3 | 4x6 | 24 | 1.12 | 2.44 | 1.61 | 18% | 0 | Medium |
+| 4 | 5x7 | 35 | 1.18 | 2.56 | 1.69 | 18% | 0 | Medium+ |
+| 5 | 6x8 | 48 | 1.24 | 2.68 | 1.77 | 17% | 1 | Hard |
+| 6 | 6x9 | 54 | 1.30 | 2.80 | 1.85 | 16% | 1 | Hard+ |
+| 7 | 7x10 | 70 | 1.36 | 2.92 | 1.93 | 15% | 2 | Expert |
+| 8 | 8x11 | 88 | 1.42 | 3.04 | 2.01 | 14% | 2 | Expert+ |
+| 9 | 9x12 | 108 | 1.48 | 3.16 | 2.09 | 14% | 3 | Master |
+| 10 | 10x14 | 140 | 1.54 | 3.28 | 2.17 | 13% | 3 | Master+ |
 
 ## Controls
 
@@ -79,9 +103,13 @@ godot --headless --path . --export-release "Web" build/web/index.html
 | `scripts/input_modes.gd` | Pure logic: mode cycle, defaults, steer vectors, save/load |
 | `scripts/tilt_input.gd` | Autoload: four modes + keyboard override / web tilt |
 | `scripts/drag_stick_overlay.gd` | On-screen virtual stick while dragging |
+| `scripts/difficulty.gd` | Per-wave maze and gameplay tuning |
+| `scripts/visual_theme.gd` | HUD/overlay StyleBox helpers |
 | `scripts/main.gd` | Wave flow and game phases |
 | `scripts/game_ui.gd` | CanvasLayer HUD and overlays |
 | `tests/test_runner.gd` | Headless test suite |
+| `tests/difficulty_table.gd` | Prints waves 1–10 difficulty table |
+| `tests/screenshot.gd` | GUI shots; `--flow` on `DISPLAY=:2` |
 | `export_presets.cfg` | Web preset (`build/web/index.html`, no threads) |
 | `.github/workflows/deploy-web.yml` | GitHub Pages deploy on `main` |
 

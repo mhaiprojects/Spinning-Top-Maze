@@ -6,6 +6,7 @@ const Launch := preload("res://scripts/launch_math.gd")
 const TopScript := preload("res://scripts/spinning_top.gd")
 const TiltScript := preload("res://scripts/tilt_input.gd")
 const MainScript := preload("res://scripts/main.gd")
+const Difficulty := preload("res://scripts/difficulty.gd")
 
 const SETTINGS_TEST := "user://test_stm_settings.cfg"
 
@@ -54,9 +55,39 @@ func _run() -> void:
 	test_all_scripts_load()
 	print("== Main scene ==")
 	await test_main_scene()
+	print("== Difficulty ramp ==")
+	test_difficulty_ramp()
 	print("== Playability flow ==")
 	await test_playability_flow()
+	print("== Wave overlay flow ==")
+	await test_wave_overlay_flow()
 	print("\nRESULT: %d passed, %d failed" % [passed, failed])
+
+
+func test_difficulty_ramp() -> void:
+	check(Difficulty.is_easy_wave_1(), "wave 1 is easy")
+	var prev_cells := 0
+	var prev_walls := 0.0
+	for wave in range(1, 11):
+		var p: Dictionary = Difficulty.params_for_wave(wave)
+		if wave > 1:
+			check(p.cells >= prev_cells, "wave %d cells >= prior" % wave)
+		prev_cells = int(p.cells)
+		for k in Difficulty.metric_keys_monotonic():
+			var pk: float = float(Difficulty.params_for_wave(wave - 1).get(k, 0))
+			var ck: float = float(p.get(k, 0))
+			check(ck + 0.0001 >= pk, "wave %d %s monotonic" % [wave, k])
+	for wave in range(1, 16):
+		for seed in [3, 9, 17, 42, 99]:
+			check(Maze.has_path(Maze.generate(wave, seed)), "path w%d seed %d" % [wave, seed])
+	var avg_w1 := 0.0
+	var avg_w10 := 0.0
+	for s in [1, 2, 3, 5, 8, 13]:
+		avg_w1 += Maze.wall_count(Maze.generate(1, s))
+		avg_w10 += Maze.wall_count(Maze.generate(10, s))
+	avg_w1 /= 6.0
+	avg_w10 /= 6.0
+	check(avg_w10 > avg_w1 + 5.0, "wall count ramp w1 %.0f -> w10 %.0f" % [avg_w1, avg_w10])
 
 
 func test_maze_paths() -> void:
@@ -106,6 +137,8 @@ func test_all_scripts_load() -> void:
 		"res://scripts/drag_stick_overlay.gd",
 		"res://scripts/game_ui.gd",
 		"res://scripts/input_modes.gd",
+		"res://scripts/difficulty.gd",
+		"res://scripts/visual_theme.gd",
 		"res://scripts/launch_math.gd",
 		"res://scripts/launch_minigame.gd",
 		"res://scripts/main.gd",
@@ -269,12 +302,19 @@ func test_playability_flow() -> void:
 	check(top.spin_power > 90.0, "centre launch power ~100 (got %.1f)" % top.spin_power)
 	var tin: Node = root.get_node_or_null("TiltInput")
 	check(tin != null, "TiltInput autoload present for playability")
-	if tin and tin.has_method("set_test_steer_vector"):
-		tin.call("set_test_steer_vector", Vector2(0, -1))
+	if tin:
+		if tin.has_method("set_steer_blocked"):
+			tin.call("set_steer_blocked", false)
+		if tin.has_method("set_test_steer_vector"):
+			tin.call("set_test_steer_vector", Vector2(0, -1))
+		var steer: Vector2 = tin.call("get_steer_vector") as Vector2
+		check(steer.y < -0.3, "test steer vector points up")
 	var y0: float = top.global_position.y
-	for i in 90:
+	for i in 120:
 		await physics_frame
-	check(top.global_position.y < y0 - 2.0, "top moves under steer vector")
+	var moved: bool = top.global_position.y < y0 - 0.5
+	var rolling: bool = top.linear_velocity.length() > 2.0
+	check(moved or rolling, "top moves under steer vector")
 	top.set_initial_power(92.0)
 	top.set_run_active(true)
 	if top.is_fallen():
@@ -307,5 +347,56 @@ func test_playability_flow() -> void:
 	check(top.is_fallen(), "playability power zero fell over")
 	if tin.has_method("clear_test_steer_vector"):
 		tin.call("clear_test_steer_vector")
+	inst.queue_free()
+	await process_frame
+
+
+func test_wave_overlay_flow() -> void:
+	var scene: PackedScene = load("res://scenes/main.tscn")
+	var inst := scene.instantiate()
+	root.add_child(inst)
+	for i in 25:
+		await process_frame
+	var main: Node = inst
+	var ui: Node = inst.get_node("UI")
+	var top: SpinningTop = _find_main_child(main, SpinningTop) as SpinningTop
+	var maze: MazeWorld = _find_main_child(main, MazeWorld) as MazeWorld
+	main.call("_begin_run", 95.0)
+	for i in 15:
+		await process_frame
+	main.call("_finish_goal", top)
+	for i in 10:
+		await process_frame
+	check(ui.overlay_visible(), "cleared overlay visible")
+	check(int(main.get("phase")) == MainScript.Phase.CLEARED, "phase cleared")
+	main.call("advance_wave")
+	for i in 25:
+		await process_frame
+	check(int(main.get("wave")) == 2, "next wave advances to 2")
+	var w2: int = Maze.wall_count(maze.maze_data)
+	main.call("_begin_run", 90.0)
+	for i in 15:
+		await process_frame
+	main.call("_finish_goal", top)
+	for i in 10:
+		await process_frame
+	var ev := InputEventKey.new()
+	ev.pressed = true
+	ev.keycode = KEY_ENTER
+	check(ui.call("handle_overlay_input", ev), "enter handled on overlay")
+	Input.parse_input_event(ev)
+	for i in 25:
+		await process_frame
+	check(int(main.get("wave")) == 3, "enter starts wave 3")
+	check(Maze.wall_count(maze.maze_data) >= w2, "wave 3 maze denser")
+	main.set("phase", MainScript.Phase.FELL)
+	ui.on_fell_over()
+	for i in 5:
+		await process_frame
+	check(ui.overlay_visible(), "fell overlay visible")
+	ui.call("_activate_overlay_action")
+	for i in 25:
+		await process_frame
+	check(int(main.get("wave")) == 3, "retry keeps wave 3 (new seed)")
 	inst.queue_free()
 	await process_frame

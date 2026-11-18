@@ -1,6 +1,8 @@
 extends Node
 ## Four-mode steering: mouse, keyboard, drag, tilt (+ keyboard override always).
 
+const PlayBg := preload("res://scripts/play_background.gd")
+
 const SMOOTH := 0.18
 const TILT_TIMEOUT_SEC := 1.5
 
@@ -32,11 +34,15 @@ var _touch_drag_armed := false
 
 signal mode_changed(selected: int, effective: int)
 signal fallback_message(text: String)
+signal background_changed(id: int)
+
+var _background: int = PlayBg.Id.TABLETOP
 
 
 func _ready() -> void:
 	_load_calibration()
 	_load_mode()
+	_load_background()
 	if OS.has_feature("web"):
 		_install_web_tilt()
 	if _selected_mode == InputModes.Mode.TILT:
@@ -45,6 +51,8 @@ func _ready() -> void:
 
 func set_settings_path(path: String) -> void:
 	_settings_path = path
+	_load_mode()
+	_load_background()
 
 
 func settings_path() -> String:
@@ -63,6 +71,37 @@ func _load_mode() -> void:
 
 func _save_mode() -> void:
 	InputModes.save_mode(_settings_path, _selected_mode)
+
+
+func _load_background() -> void:
+	_background = UserSettings.load_background(_settings_path)
+
+
+func _save_background() -> void:
+	UserSettings.save_background(_settings_path, _background)
+
+
+func selected_background() -> int:
+	return _background
+
+
+func background_name() -> String:
+	return PlayBg.name_for(_background)
+
+
+func cycle_background() -> int:
+	_background = PlayBg.next_id(_background)
+	_save_background()
+	background_changed.emit(_background)
+	return _background
+
+
+func set_background(id: int) -> void:
+	if not PlayBg.ORDER.has(id):
+		return
+	_background = id
+	_save_background()
+	background_changed.emit(_background)
 
 
 func selected_mode() -> int:

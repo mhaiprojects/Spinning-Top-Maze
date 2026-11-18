@@ -65,7 +65,22 @@ func _ready() -> void:
 	add_child(_goal)
 	_new_wave_seed()
 	get_viewport().size_changed.connect(_on_viewport_changed)
+	call_deferred("_wire_play_background")
 	call_deferred("_bootstrap")
+
+
+func _wire_play_background() -> void:
+	var tin: Node = get_node_or_null("/root/TiltInput")
+	if tin == null:
+		return
+	if tin.has_signal("background_changed"):
+		tin.background_changed.connect(_on_play_background_changed)
+	if tin.has_method("selected_background"):
+		_maze.set_play_background(tin.call("selected_background"))
+
+
+func _on_play_background_changed(id: int) -> void:
+	_maze.set_play_background(id)
 
 
 func _bootstrap() -> void:

@@ -18,6 +18,7 @@ var _lbl_tilt: Label
 var _lbl_msg: Label
 var _btn_cal: Button
 var _btn_mode: Button
+var _btn_board: Button
 var _btn_pause: Button
 var _btn_retry: Button
 var _overlay: Control
@@ -40,8 +41,12 @@ func _ready() -> void:
 			tin.mode_changed.connect(_on_mode_changed)
 		if tin.has_signal("fallback_message"):
 			tin.fallback_message.connect(_on_fallback_message)
+		if tin.has_signal("background_changed"):
+			tin.background_changed.connect(_on_background_changed)
 		_refresh_mode_button()
+		_refresh_board_button()
 	call_deferred("_refresh_mode_button")
+	call_deferred("_refresh_board_button")
 
 
 func set_layout_rects(vp: Vector2, play: Rect2, top_h: float, _bot_h: float) -> void:
@@ -161,6 +166,9 @@ func _build_hud() -> void:
 	_btn_mode = _btn("Input: Mouse [M]", _on_cycle_mode)
 	_btn_mode.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(_btn_mode)
+	_btn_board = _btn("Board: Tabletop [B]", _on_cycle_board)
+	_btn_board.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(_btn_board)
 	_btn_cal = _btn("Calibrate", _on_calibrate)
 	row.add_child(_btn_cal)
 	_btn_pause = _btn("Pause", _on_pause)
@@ -277,6 +285,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event.keycode == KEY_M or event.keycode == KEY_TAB:
 			_cycle_mode()
 			get_viewport().set_input_as_handled()
+		elif event.keycode == KEY_B:
+			_cycle_board()
+			get_viewport().set_input_as_handled()
 
 
 func _wave_header(w: int) -> void:
@@ -346,6 +357,31 @@ func _activate_overlay_action() -> void:
 
 func _on_cycle_mode() -> void:
 	_cycle_mode()
+
+
+func _on_cycle_board() -> void:
+	_cycle_board()
+
+
+func _cycle_board() -> void:
+	var tin: Node = get_node_or_null("/root/TiltInput")
+	if tin and tin.has_method("cycle_background"):
+		tin.call("cycle_background")
+	_refresh_board_button()
+
+
+func _on_background_changed(_id: int) -> void:
+	_refresh_board_button()
+
+
+func _refresh_board_button() -> void:
+	var tin: Node = get_node_or_null("/root/TiltInput")
+	if tin == null or _btn_board == null:
+		return
+	var name: String = "Tabletop"
+	if tin.has_method("background_name"):
+		name = str(tin.call("background_name"))
+	_btn_board.text = "Board: %s [B]" % name
 
 
 func _cycle_mode() -> void:

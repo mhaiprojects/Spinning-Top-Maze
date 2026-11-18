@@ -78,6 +78,7 @@ static func generate(wave: int, seed_val: int) -> Dictionary:
 					_remove_wall_between_dir(room_walls, x, y, dir_i, cols, rows)
 
 	_force_perimeter_walls(room_walls, cols, rows)
+	_ensure_start_opening(room_walls, cols, rows, start_cell)
 
 	var cells: Array = []
 	for y in rows:
@@ -118,6 +119,14 @@ static func _is_perimeter_wall(x: int, y: int, dir_i: int, cols: int, rows: int)
 	if dir_i == W_E and x == cols - 1:
 		return true
 	return false
+
+
+static func _ensure_start_opening(room_walls: Array, _cols: int, rows: int, start: Vector2i) -> void:
+	if start.y <= 0:
+		return
+	var north: Vector2i = start + Vector2i(0, -1)
+	if room_walls[start.y][start.x][W_N]:
+		_remove_wall_between(room_walls, start, north, W_N)
 
 
 static func _force_perimeter_walls(room_walls: Array, cols: int, rows: int) -> void:

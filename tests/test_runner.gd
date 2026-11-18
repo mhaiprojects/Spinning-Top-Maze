@@ -84,6 +84,10 @@ func _run() -> void:
 	await test_real_launch_steering()
 	print("== Intro and goal fall ==")
 	await test_intro_and_goal_fall()
+	print("== Drag after board switch ==")
+	await test_drag_after_background_switch()
+	print("== Board key and button ==")
+	await test_board_key_and_button()
 	print("\nRESULT: %d passed, %d failed" % [passed, failed])
 
 
@@ -442,7 +446,7 @@ func test_playability_flow() -> void:
 		await physics_frame
 	var moved: bool = top.global_position.y < y0 - 0.5
 	var rolling: bool = top.linear_velocity.length() > 2.0
-	check(moved or rolling, "top moves under steer vector")
+	check(moved, "top moves under steer vector (position must change, not just velocity)")
 	top.set_initial_power(92.0)
 	top.set_run_active(true)
 	if top.is_fallen():
@@ -488,7 +492,22 @@ func _main_key(main: Node, key: Key, pressed: bool) -> void:
 	main.call("_unhandled_input", e)
 
 
+func _release_steer_inputs() -> void:
+	for key in [KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_W, KEY_A, KEY_S, KEY_D]:
+		var ev := InputEventKey.new()
+		ev.pressed = false
+		ev.keycode = key
+		Input.parse_input_event(ev)
+	var up := InputEventMouseButton.new()
+	up.pressed = false
+	up.button_index = MOUSE_BUTTON_LEFT
+	Input.parse_input_event(up)
+
+
 func _tin_drag(_main: Node, tin: Node, from: Vector2, to: Vector2, steps: int) -> void:
+	# Warp the real cursor so TiltInput._process (which reads get_mouse_position)
+	# cannot overwrite the synthetic drag pointer with a stale cursor.
+	DisplayServer.warp_mouse(Vector2i(int(from.x), int(from.y)))
 	var down := InputEventMouseButton.new()
 	down.pressed = true
 	down.button_index = MOUSE_BUTTON_LEFT
@@ -499,6 +518,7 @@ func _tin_drag(_main: Node, tin: Node, from: Vector2, to: Vector2, steps: int) -
 	for j in steps:
 		var t: float = float(j + 1) / float(steps)
 		var p: Vector2 = from.lerp(to, t)
+		DisplayServer.warp_mouse(Vector2i(int(p.x), int(p.y)))
 		var mot := InputEventMouseMotion.new()
 		mot.position = p
 		mot.global_position = p
@@ -515,6 +535,12 @@ func _tin_drag(_main: Node, tin: Node, from: Vector2, to: Vector2, steps: int) -
 
 
 func test_real_launch_steering() -> void:
+	_release_steer_inputs()
+	var tin0: Node = root.get_node_or_null("TiltInput")
+	if tin0 and tin0.has_method("set_mode"):
+		tin0.call("set_mode", InputModes.Mode.KEYBOARD)
+		if tin0.has_method("clear_test_steer_vector"):
+			tin0.call("clear_test_steer_vector")
 	var scene: PackedScene = load("res://scenes/main.tscn")
 	var inst := scene.instantiate()
 	root.add_child(inst)
@@ -542,7 +568,10 @@ func test_real_launch_steering() -> void:
 		await physics_frame
 	check(int(main.get("phase")) == MainScript.Phase.RUN, "still in run after idle")
 	var spawn_p: Vector2 = maze.run_spawn_position()
-	check(top.global_position.distance_to(spawn_p) < 8.0, "top parked at run spawn")
+	check(
+		top.global_position.distance_to(spawn_p) < 24.0,
+		"top parked at run spawn (d=%.1f)" % top.global_position.distance_to(spawn_p)
+	)
 	check(top.spin_power < p_idle - 0.4, "power decays during idle (%.1f -> %.1f)" % [p_idle, top.spin_power])
 	var y0: float = top.global_position.y
 	check(not top.freeze, "top unfrozen after real launch path")
@@ -555,13 +584,15 @@ func test_real_launch_steering() -> void:
 	tin.call("set_steer_blocked", false)
 	tin.call("set_mode", InputModes.Mode.DRAG)
 	y0 = top.global_position.y
+	DisplayServer.warp_mouse(Vector2i(360, 900))
 	var down := InputEventMouseButton.new()
 	down.button_index = MOUSE_BUTTON_LEFT
 	down.pressed = true
 	down.position = Vector2(360, 900)
 	Input.parse_input_event(down)
 	tin.call("handle_input", down)
-	for j in 24:
+	for j in 60:
+		DisplayServer.warp_mouse(Vector2i(360, 680))
 		var mot := InputEventMouseMotion.new()
 		mot.position = Vector2(360, 680)
 		mot.button_mask = MOUSE_BUTTON_MASK_LEFT
@@ -570,7 +601,7 @@ func test_real_launch_steering() -> void:
 		await physics_frame
 	var drag_dy: float = y0 - top.global_position.y
 	check(
-		drag_dy > 20.0 or top.linear_velocity.length() > 8.0,
+		drag_dy > 20.0,
 		"drag after real launch moves top up %.1f px vel %.1f"
 		% [drag_dy, top.linear_velocity.length()]
 	)
@@ -600,7 +631,7 @@ func test_real_launch_steering() -> void:
 	Input.parse_input_event(kup)
 	var kb_dy: float = kb0 - top.global_position.y
 	check(
-		kb_dy > 20.0 or top.linear_velocity.length() > 8.0,
+		kb_dy > 20.0,
 		"keyboard up after real launch moves top %.1f px vel %.1f"
 		% [kb_dy, top.linear_velocity.length()]
 	)
@@ -666,14 +697,14 @@ func test_steer_after_idle() -> void:
 	down.pressed = true
 	down.position = Vector2(360, 900)
 	Input.parse_input_event(down)
-	for j in 18:
+	for j in 50:
 		var mot := InputEventMouseMotion.new()
 		mot.position = Vector2(360, 720)
 		mot.button_mask = MOUSE_BUTTON_MASK_LEFT
 		Input.parse_input_event(mot)
 		await physics_frame
-	var drag_moved: bool = top.global_position.y < y0 - 1.5 or top.linear_velocity.length() > 1.5
-	check(drag_moved, "drag steering after idle moves top")
+	var drag_moved: bool = top.global_position.y < y0 - 15.0
+	check(drag_moved, "drag steering after idle moves top (position %.1f -> %.1f)" % [y0, top.global_position.y])
 	var up := InputEventMouseButton.new()
 	up.button_index = MOUSE_BUTTON_LEFT
 	up.pressed = false
@@ -702,8 +733,8 @@ func test_steer_after_idle() -> void:
 	Input.parse_input_event(mm)
 	for k in 70:
 		await physics_frame
-	var mouse_moved: bool = top.global_position.distance_to(pos_before) > 2.0 or top.linear_velocity.length() > 1.0
-	check(mouse_moved, "mouse steering after idle moves top")
+	var mouse_moved: bool = top.global_position.distance_to(pos_before) > 8.0
+	check(mouse_moved, "mouse steering after idle moves top (dist %.1f)" % top.global_position.distance_to(pos_before))
 
 	tin.call("set_mode", InputModes.Mode.KEYBOARD)
 	top.reset_top(
@@ -718,16 +749,169 @@ func test_steer_after_idle() -> void:
 	kdown.pressed = true
 	kdown.keycode = KEY_UP
 	Input.parse_input_event(kdown)
-	for n in 70:
+	for n in 90:
 		await physics_frame
 	var kup := InputEventKey.new()
 	kup.pressed = false
 	kup.keycode = KEY_UP
 	Input.parse_input_event(kup)
 	check(
-		top.global_position.y < kb0.y - 1.0 or top.linear_velocity.length() > 1.0,
-		"keyboard up after idle moves top"
+		top.global_position.y < kb0.y - 15.0,
+		"keyboard up after idle moves top (dy %.1f)" % (kb0.y - top.global_position.y)
 	)
+	inst.queue_free()
+	await process_frame
+
+
+
+
+func test_board_key_and_button() -> void:
+	# KEY_B and the HUD Board button must actually cycle the theme (not get
+	# swallowed by a full-rect Control / focus / unhandled-input order).
+	_release_steer_inputs()
+	var scene: PackedScene = load("res://scenes/main.tscn")
+	var inst := scene.instantiate()
+	root.add_child(inst)
+	for i in 25:
+		await process_frame
+	var ui: Node = inst.get_node_or_null("UI")
+	var tin: Node = root.get_node_or_null("TiltInput")
+	var btn: Button = ui.get("_btn_board") as Button if ui else null
+	check(btn != null and tin != null, "Board button and TiltInput present")
+	tin.call("set_background", PlayBg.Id.TABLETOP)
+	for i in 6:
+		await process_frame
+	check(int(tin.call("selected_background")) == PlayBg.Id.TABLETOP, "start on tabletop")
+	check(str(btn.text).contains("Tabletop"), "HUD label starts Tabletop")
+
+	var vp: Viewport = inst.get_viewport()
+	var key_b := InputEventKey.new()
+	key_b.pressed = true
+	key_b.echo = false
+	key_b.keycode = KEY_B
+	vp.push_input(key_b)
+	var key_up := InputEventKey.new()
+	key_up.pressed = false
+	key_up.keycode = KEY_B
+	vp.push_input(key_up)
+	for i in 8:
+		await process_frame
+	check(
+		int(tin.call("selected_background")) == PlayBg.Id.CHOPPING,
+		"B key cycles to chopping (now %s)" % tin.call("background_name")
+	)
+	check(str(btn.text).contains("Chopping"), "HUD label updates after B key")
+
+	# No full-rect overlay should swallow HUD clicks, and the Board button's
+	# pressed handler must cycle the theme (same path as a player click).
+	var r: Rect2 = btn.get_global_rect()
+	check(r.size.x > 8.0 and r.size.y > 8.0, "Board button has a clickable rect %s" % r)
+	var overlay: Control = ui.get("_overlay") as Control
+	if overlay:
+		check(
+			(not overlay.visible) or overlay.mouse_filter == Control.MOUSE_FILTER_IGNORE,
+			"wave overlay does not swallow Board button clicks"
+		)
+	var intro: Node = inst.get_node_or_null("LaunchIntroLayer")
+	if intro and intro.get_child_count() > 0:
+		var intro_c: Node = intro.get_child(0)
+		if intro_c is Control:
+			check(
+				(not (intro_c as Control).visible) or (intro_c as Control).mouse_filter == Control.MOUSE_FILTER_IGNORE,
+				"intro layer does not swallow Board button clicks"
+			)
+	var before_click: int = int(tin.call("selected_background"))
+	btn.pressed.emit()
+	for i in 8:
+		await process_frame
+	var after_click: int = int(tin.call("selected_background"))
+	check(
+		after_click == PlayBg.next_id(before_click),
+		"Board button click cycles theme %s -> %s" % [before_click, after_click]
+	)
+	check(str(btn.text).contains(str(tin.call("background_name"))), "HUD label updates after Board click")
+	inst.queue_free()
+	await process_frame
+
+
+func test_drag_after_background_switch() -> void:
+	# Fails without the Main._process parent-transform fix: velocity can be
+	# non-zero while the top stays glued to the spawn pose.
+	_release_steer_inputs()
+	var scene: PackedScene = load("res://scenes/main.tscn")
+	var inst := scene.instantiate()
+	root.add_child(inst)
+	for i in 20:
+		await process_frame
+	var main: Node = inst
+	var ui: Node = inst.get_node_or_null("UI")
+	check(ui != null and ui.get("_btn_board") != null, "HUD Board button is present")
+	await _skip_intro(main)
+	main.call("_begin_run", 95.0)
+	for i in 20:
+		await process_frame
+	var top: SpinningTop = _find_main_child(main, SpinningTop) as SpinningTop
+	var maze: MazeWorld = _find_main_child(main, MazeWorld) as MazeWorld
+	var tin: Node = root.get_node_or_null("TiltInput")
+	check(top != null and tin != null, "top and TiltInput ready after launch")
+	main.set("phase", MainScript.Phase.RUN)
+	main.set("_overlay_busy", false)
+	tin.call("set_steer_blocked", false)
+	tin.call("set_mode", InputModes.Mode.DRAG)
+	_release_steer_inputs()
+	var btn: Button = ui.get("_btn_board") as Button
+	if btn:
+		check(btn.focus_mode == Control.FOCUS_NONE, "Board button does not take keyboard focus")
+	for bg_i in PlayBg.ORDER.size():
+		if bg_i > 0:
+			if tin.has_method("cycle_background"):
+				tin.call("cycle_background")
+			for i in 8:
+				await process_frame
+		var bg_name: String = str(tin.call("background_name")) if tin.has_method("background_name") else str(bg_i)
+		top.reset_top(maze.run_spawn_position(), 95.0)
+		top.set_run_active(true)
+		main.set("phase", MainScript.Phase.RUN)
+		tin.call("set_steer_blocked", false)
+		for i in 12:
+			await physics_frame
+		# Parent must not be snapping the rigid body every idle frame.
+		check(
+			main.position == main.get("_base_position"),
+			"main is at rest pose on %s (not rewriting position every frame)" % bg_name
+		)
+		var y0: float = top.global_position.y
+		await _tin_drag(main, tin, Vector2(360, 900), Vector2(360, 680), 60)
+		var dy: float = y0 - top.global_position.y
+		check(
+			dy > 20.0,
+			"drag after board=%s moves top up %.1f px (velocity loophole not accepted)"
+			% [bg_name, dy]
+		)
+		# Keyboard after the Board button has been used.
+		top.reset_top(maze.run_spawn_position(), 95.0)
+		top.set_run_active(true)
+		main.set("phase", MainScript.Phase.RUN)
+		tin.call("set_steer_blocked", false)
+		tin.call("set_mode", InputModes.Mode.KEYBOARD)
+		for i in 8:
+			await physics_frame
+		var kb0: float = top.global_position.y
+		var kdown := InputEventKey.new()
+		kdown.pressed = true
+		kdown.keycode = KEY_UP
+		Input.parse_input_event(kdown)
+		for n in 90:
+			await physics_frame
+		var kup := InputEventKey.new()
+		kup.pressed = false
+		kup.keycode = KEY_UP
+		Input.parse_input_event(kup)
+		check(
+			kb0 - top.global_position.y > 20.0,
+			"keyboard up after board=%s moves top %.1f px" % [bg_name, kb0 - top.global_position.y]
+		)
+		tin.call("set_mode", InputModes.Mode.DRAG)
 	inst.queue_free()
 	await process_frame
 

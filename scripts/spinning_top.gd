@@ -3,8 +3,11 @@ extends RigidBody2D
 ## Top-down spinning top: tilt force, spin power, wall bounce loss.
 
 signal fell_over
+signal victory_complete
 signal power_changed(value: float)
 signal hit_wall
+
+enum FallKind { NONE, POWER, GOAL }
 
 const MIN_HIT_LOSS := 3.0
 const MAX_HIT_POWER_LOSS := 12.0
@@ -15,10 +18,15 @@ const STEER_FORCE := 480.0
 const MAX_LINEAR_SPEED := 520.0
 const RADIUS := 40.0
 const TRAIL_LEN := 18
+const FALL_ANIM := 1.0
 
 var spin_power: float = 100.0
 var _falling := false
 var _fall_t := 0.0
+var _fall_kind: FallKind = FallKind.NONE
+var _goal_target := Vector2.ZERO
+var _goal_start := Vector2.ZERO
+var _fall_power_start := 100.0
 var _wobble_phase := 0.0
 var _last_hit_ms := 0
 var _run_active := false
@@ -74,6 +82,8 @@ func configure_for_wave(wave: int) -> void:
 
 
 func set_run_active(active: bool) -> void:
+	if _fall_kind != FallKind.NONE:
+		return
 	_run_active = active
 	if active:
 		collision_layer = 1
@@ -97,17 +107,37 @@ func set_initial_power(p: float) -> void:
 	power_changed.emit(spin_power)
 
 
+func start_goal_victory(target: Vector2) -> void:
+	_fall_kind = FallKind.GOAL
+	_falling = false
+	_fall_t = 0.0
+	_goal_target = target
+	_goal_start = global_position
+	_fall_power_start = spin_power
+	_run_active = false
+	collision_layer = 0
+	collision_mask = 0
+	freeze = true
+	linear_velocity = Vector2.ZERO
+
+
+func fall_kind() -> int:
+	return int(_fall_kind)
+
+
 func _physics_process(delta: float) -> void:
-	if not _run_active:
+	if _fall_kind == FallKind.GOAL:
+		_advance_goal_fall(delta)
 		return
-	if _falling:
-		_fall_t += delta
-		queue_redraw()
+	if _fall_kind == FallKind.POWER:
+		_advance_power_fall(delta)
+		return
+	if not _run_active:
 		return
 	spin_power = maxf(0.0, spin_power - _decay_rate * delta)
 	power_changed.emit(spin_power)
 	if spin_power <= 0.0:
-		call_deferred("_begin_fall")
+		_begin_power_fall()
 		return
 	var tin: Node = get_tree().root.get_node_or_null("TiltInput")
 	if tin and tin.has_method("set_top_world_position"):
@@ -117,13 +147,41 @@ func _physics_process(delta: float) -> void:
 		if sleeping:
 			sleeping = false
 		apply_central_force(tilt * STEER_FORCE * (0.35 + 0.65 * spin_power / 100.0))
+	if linear_velocity.length() > MAX_LINEAR_SPEED:
+		linear_velocity = linear_velocity.normalized() * MAX_LINEAR_SPEED
 	_wobble_phase += delta * (8.0 + spin_power * 0.12)
 	var spin_rate: float = (spin_power / 100.0) * 24.0
 	angular_velocity = lerp(angular_velocity, spin_rate, 0.15)
-	if linear_velocity.length() > MAX_LINEAR_SPEED:
-		linear_velocity = linear_velocity.normalized() * MAX_LINEAR_SPEED
 	_push_trail()
 	queue_redraw()
+
+
+func _advance_goal_fall(delta: float) -> void:
+	_fall_t += delta
+	var u: float = clampf(_fall_t / FALL_ANIM, 0.0, 1.0)
+	var glide: float = clampf(u / 0.55, 0.0, 1.0)
+	var ease: float = glide * glide * (3.0 - 2.0 * glide)
+	global_position = _goal_start.lerp(_goal_target, ease)
+	spin_power = lerpf(_fall_power_start, 8.0, ease)
+	power_changed.emit(spin_power)
+	if u > 0.55:
+		_falling = true
+	if _fall_t >= FALL_ANIM:
+		_fall_kind = FallKind.NONE
+		_falling = false
+		victory_complete.emit()
+	queue_redraw()
+
+
+func _advance_power_fall(delta: float) -> void:
+	_fall_t += delta
+	_falling = true
+	spin_power = maxf(0.0, spin_power - 80.0 * delta)
+	power_changed.emit(spin_power)
+	queue_redraw()
+	if _fall_t >= FALL_ANIM:
+		_fall_kind = FallKind.NONE
+		_emit_fell_over()
 
 
 func _push_trail() -> void:
@@ -133,7 +191,6 @@ func _push_trail() -> void:
 	_trail_line.clear_points()
 	var i := 0
 	for p in _trail:
-		var alpha: float = float(i) / float(maxi(_trail.size() - 1, 1))
 		_trail_line.add_point(to_local(p))
 		i += 1
 	var c: Color = _trail_line.default_color
@@ -141,15 +198,18 @@ func _push_trail() -> void:
 	_trail_line.default_color = c
 
 
-func _begin_fall() -> void:
-	if _falling or not _run_active:
+func _begin_power_fall() -> void:
+	if _fall_kind != FallKind.NONE:
 		return
-	_falling = true
+	_fall_kind = FallKind.POWER
 	_fall_t = 0.0
+	_falling = true
 	linear_velocity = Vector2.ZERO
 	angular_velocity = 0.0
-	set_run_active(false)
-	call_deferred("_emit_fell_over")
+	freeze = true
+	collision_layer = 0
+	collision_mask = 0
+	_run_active = false
 
 
 func _emit_fell_over() -> void:
@@ -157,15 +217,15 @@ func _emit_fell_over() -> void:
 
 
 func is_fallen() -> bool:
-	return _falling
+	return _fall_kind == FallKind.POWER
 
 
 func fall_progress() -> float:
-	return clampf(_fall_t / 0.45, 0.0, 1.0)
+	return clampf(_fall_t / FALL_ANIM, 0.0, 1.0)
 
 
 func apply_wall_hit(impact_speed: float, spark_local: Vector2 = Vector2.ZERO) -> void:
-	if not _run_active or _falling:
+	if not _run_active or _fall_kind != FallKind.NONE:
 		return
 	var now: int = Time.get_ticks_msec()
 	if now - _last_hit_ms < HIT_COOLDOWN_MS:
@@ -186,7 +246,7 @@ func apply_wall_hit(impact_speed: float, spark_local: Vector2 = Vector2.ZERO) ->
 
 
 func _on_body_entered(body: Node) -> void:
-	if not _run_active or _falling:
+	if not _run_active or _fall_kind != FallKind.NONE:
 		return
 	if body.is_in_group("hazard_zone"):
 		call_deferred("_apply_wall_hit_deferred", 25.0)
@@ -209,6 +269,7 @@ func _tilt_vector() -> Vector2:
 
 func reset_top(pos: Vector2, power: float) -> void:
 	_falling = false
+	_fall_kind = FallKind.NONE
 	_fall_t = 0.0
 	global_position = pos
 	linear_velocity = Vector2.ZERO
@@ -221,31 +282,56 @@ func reset_top(pos: Vector2, power: float) -> void:
 
 
 func _draw() -> void:
-	draw_circle(Vector2(6, 8), RADIUS * 0.95, Color(0, 0, 0, 0.22))
-	var wobble: float = 0.0
-	if not _falling:
-		wobble = (1.0 - spin_power / 100.0) * 11.0 * sin(_wobble_phase)
-	var tilt_draw: float = wobble * 0.03
-	draw_set_transform(Vector2.ZERO, tilt_draw, Vector2.ONE)
-	var body_col := Color(1.0, 0.88, 0.28)
-	var rim_col := Color(0.62, 0.25, 0.1)
-	var stripe_col := Color(1.0, 0.45, 0.12)
-	if _falling:
-		var t: float = fall_progress()
-		draw_set_transform(Vector2.ZERO, rotation + t * PI * 0.5, Vector2.ONE.lerp(Vector2(1.3, 0.35), t))
-		body_col = body_col.lerp(Color(0.45, 0.42, 0.4), t)
-	for ring_i in 4:
-		var rr: float = RADIUS * (1.0 - float(ring_i) * 0.18)
-		var col: Color = body_col.lerp(Color(1, 1, 1), float(ring_i) * 0.08)
-		draw_circle(Vector2.ZERO, rr, col)
-	draw_arc(Vector2.ZERO, RADIUS, 0, TAU, 40, Color(1, 0.95, 0.75, 0.35), 2.0)
-	draw_arc(Vector2.ZERO, RADIUS, 0, TAU, 40, rim_col, 3.5)
-	draw_circle(Vector2.ZERO, RADIUS * 0.28, Color(0.12, 0.08, 0.06))
-	var spoke_n := int(5 + spin_power / 18.0)
-	for i in spoke_n:
-		var a: float = rotation + TAU * float(i) / float(spoke_n) + _wobble_phase * 0.4
-		draw_line(Vector2.ZERO, Vector2(cos(a), sin(a)) * (RADIUS * 0.9), stripe_col, 3.5)
-	var tip := Vector2(0, -RADIUS * 0.48).rotated(rotation + wobble * 0.06)
-	draw_circle(tip, 6.0, rim_col)
-	draw_circle(tip, 3.0, Color(1, 0.9, 0.7))
+	var shadow_scale := Vector2(1.15, 0.42)
+	draw_set_transform(Vector2(8, 12), 0.0, shadow_scale)
+	draw_circle(Vector2.ZERO, RADIUS * 0.82, Color(0, 0, 0, 0.28))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	var wobble: float = (1.0 - spin_power / 100.0) * 14.0 * sin(_wobble_phase)
+	var precess: float = wobble * 0.04
+	if _falling or _fall_kind == FallKind.GOAL:
+		var t: float = fall_progress()
+		precess += t * 0.9
+		draw_set_transform(Vector2.ZERO, precess, Vector2(1.0 + t * 0.25, 0.55 + t * 0.35))
+	else:
+		draw_set_transform(Vector2.ZERO, precess, Vector2.ONE)
+	var spin_ang: float = _wobble_phase * (1.2 + spin_power * 0.02)
+	_draw_classic_body(spin_ang)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+func _draw_classic_body(spin_ang: float) -> void:
+	var wood_a := Color(0.72, 0.38, 0.14)
+	var wood_b := Color(0.95, 0.62, 0.22)
+	var wood_c := Color(0.55, 0.28, 0.1)
+	var pts := PackedVector2Array([
+		Vector2(-RADIUS * 0.72, -RADIUS * 0.15),
+		Vector2(RADIUS * 0.72, -RADIUS * 0.15),
+		Vector2(RADIUS * 0.38, RADIUS * 0.55),
+		Vector2(0, RADIUS * 0.72),
+		Vector2(-RADIUS * 0.38, RADIUS * 0.55),
+	])
+	draw_colored_polygon(pts, wood_a)
+	for band_i in 4:
+		var by: float = lerpf(-RADIUS * 0.12, RADIUS * 0.5, float(band_i) / 4.0)
+		var col: Color = wood_b if band_i % 2 == 0 else wood_c
+		draw_line(Vector2(-RADIUS * 0.65, by), Vector2(RADIUS * 0.65, by), col, 5.0)
+	var stripe_n := 10
+	for i in stripe_n:
+		var a: float = spin_ang + TAU * float(i) / float(stripe_n)
+		draw_line(
+			Vector2.ZERO,
+			Vector2(cos(a), sin(a)) * RADIUS * 0.62,
+			Color(1, 0.9, 0.55, 0.25),
+			3.0
+		)
+	draw_circle(Vector2(0, -RADIUS * 0.35), RADIUS * 0.2, Color(0.92, 0.88, 0.82))
+	draw_rect(Rect2(-RADIUS * 0.08, -RADIUS * 0.62, RADIUS * 0.16, RADIUS * 0.42), Color(0.75, 0.45, 0.2))
+	draw_circle(Vector2(0, -RADIUS * 0.62), RADIUS * 0.12, Color(0.9, 0.92, 0.95))
+	draw_circle(Vector2(0, RADIUS * 0.64), RADIUS * 0.12, Color(0.55, 0.56, 0.6))
+	draw_circle(Vector2(0, RADIUS * 0.68), RADIUS * 0.05, Color(0.95, 0.95, 1.0))
+	var hi := PackedVector2Array([
+		Vector2(-RADIUS * 0.35, -RADIUS * 0.1),
+		Vector2(-RADIUS * 0.05, -RADIUS * 0.22),
+		Vector2(-RADIUS * 0.22, RADIUS * 0.15),
+	])
+	draw_colored_polygon(hi, Color(1, 1, 1, 0.18))

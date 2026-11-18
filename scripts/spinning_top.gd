@@ -8,7 +8,8 @@ signal hit_wall
 
 const MIN_HIT_LOSS := 4.0
 const HIT_LOSS_SCALE := 1.2
-const STEER_FORCE := 280.0
+const STEER_FORCE := 480.0
+const MAX_LINEAR_SPEED := 520.0
 const RADIUS := 40.0
 const TRAIL_LEN := 18
 
@@ -27,7 +28,7 @@ var _spark: CPUParticles2D
 
 func _ready() -> void:
 	gravity_scale = 0.0
-	linear_damp = 2.8
+	linear_damp = 2.2
 	angular_damp = 1.5
 	can_sleep = false
 	body_entered.connect(_on_body_entered)
@@ -115,6 +116,8 @@ func _physics_process(delta: float) -> void:
 	_wobble_phase += delta * (8.0 + spin_power * 0.12)
 	var spin_rate: float = (spin_power / 100.0) * 24.0
 	angular_velocity = lerp(angular_velocity, spin_rate, 0.15)
+	if linear_velocity.length() > MAX_LINEAR_SPEED:
+		linear_velocity = linear_velocity.normalized() * MAX_LINEAR_SPEED
 	_push_trail()
 	queue_redraw()
 

@@ -46,6 +46,7 @@ func _run() -> void:
 	print("== Top collision power loss ==")
 	await test_top_wall_hit()
 	await test_top_physics_wall_hit()
+	await test_top_speed_cap()
 	print("== Input modes ==")
 	test_input_mode_logic()
 	test_input_vectors()
@@ -207,6 +208,31 @@ func test_top_physics_wall_hit() -> void:
 	check(top.spin_power < p0, "physics wall contact lowers spin power")
 	top.queue_free()
 	wall.queue_free()
+	await process_frame
+
+
+func test_top_speed_cap() -> void:
+	var top: SpinningTop = TopScript.new()
+	root.add_child(top)
+	await physics_frame
+	top.set_run_active(true)
+	top.set_initial_power(100.0)
+	top.global_position = Vector2(200, 400)
+	var tin: Node = root.get_node_or_null("TiltInput")
+	if tin:
+		if tin.has_method("set_steer_blocked"):
+			tin.call("set_steer_blocked", false)
+		if tin.has_method("set_test_steer_vector"):
+			tin.call("set_test_steer_vector", Vector2(0, -1))
+	var peak := 0.0
+	for i in 220:
+		await physics_frame
+		peak = maxf(peak, top.linear_velocity.length())
+	check(peak > 90.0, "full steer reaches higher speed (peak %.0f)" % peak)
+	check(peak <= TopScript.MAX_LINEAR_SPEED + 8.0, "speed capped at MAX_LINEAR_SPEED")
+	if tin and tin.has_method("clear_test_steer_vector"):
+		tin.call("clear_test_steer_vector")
+	top.queue_free()
 	await process_frame
 
 

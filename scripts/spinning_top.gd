@@ -49,6 +49,9 @@ func _physics_process(delta: float) -> void:
 	if spin_power <= 0.0:
 		_begin_fall()
 		return
+	var tin: Node = get_tree().root.get_node_or_null("TiltInput")
+	if tin and tin.has_method("set_top_world_position"):
+		tin.call("set_top_world_position", global_position)
 	var tilt: Vector2 = _tilt_vector()
 	if tilt.length_squared() > 0.0001:
 		apply_central_force(tilt * STEER_FORCE * (0.35 + 0.65 * spin_power / 100.0))

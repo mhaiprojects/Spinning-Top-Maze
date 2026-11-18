@@ -233,6 +233,10 @@ func test_input_vectors() -> void:
 	var raw := Vector2(0.5, 0.0)
 	var t: Vector2 = InputModes.steer_tilt(raw, Vector2(0.1, 0.0), raw)
 	check(t.length() > 0.0, "tilt subtracts calibration")
+	check(t.x < 0.0, "positive raw tilt x steers left (invert)")
+	var raw_neg := Vector2(-0.5, 0.0)
+	var t2: Vector2 = InputModes.steer_tilt(raw_neg, Vector2.ZERO, raw_neg)
+	check(t2.x > 0.0, "negative raw tilt x steers right (invert)")
 	var rot: Vector2 = InputModes.rotate_for_screen(Vector2(1, 0), 90.0)
 	check(absf(rot.y) > 0.9, "tilt orientation rotation")
 

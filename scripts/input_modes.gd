@@ -9,7 +9,14 @@ const ORDER: Array[int] = [Mode.MOUSE, Mode.KEYBOARD, Mode.DRAG, Mode.TILT]
 const MOUSE_DEADZONE := 18.0
 const MOUSE_MAX_DIST := 220.0
 const TILT_DEADZONE := 0.08
+const TILT_INVERT_X := true
 const DRAG_RADIUS := 120.0
+
+
+static func map_tilt_axes(v: Vector2) -> Vector2:
+	if TILT_INVERT_X:
+		return Vector2(-v.x, v.y)
+	return v
 
 
 static func mode_name(mode: int) -> String:
@@ -99,7 +106,9 @@ static func steer_drag(pointer: Vector2, origin: Vector2, active: bool) -> Vecto
 
 
 static func steer_tilt(raw: Vector2, cal_offset: Vector2, oriented: Vector2) -> Vector2:
-	var base: Vector2 = oriented - cal_offset
+	var o: Vector2 = map_tilt_axes(oriented)
+	var cal: Vector2 = map_tilt_axes(cal_offset)
+	var base: Vector2 = o - cal
 	if base.length() > 1.0:
 		base = base.normalized()
 	return apply_radial_deadzone(base, TILT_DEADZONE)

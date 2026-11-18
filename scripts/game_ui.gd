@@ -61,6 +61,12 @@ func overlay_button_rect() -> Rect2:
 	return _overlay_btn.get_global_rect()
 
 
+func overlay_card_rect() -> Rect2:
+	if _overlay_card == null:
+		return Rect2()
+	return _overlay_card.get_global_rect()
+
+
 func hud_screen_rect() -> Rect2:
 	if _hud_band == null:
 		return Rect2()
@@ -83,7 +89,9 @@ func handle_overlay_input(event: InputEvent) -> bool:
 			return true
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		if _overlay_btn.get_global_rect().has_point(event.position):
-			return false
+			_activate_overlay_action()
+			get_viewport().set_input_as_handled()
+			return true
 	return false
 
 
@@ -93,6 +101,15 @@ func _build_hud() -> void:
 	_hud_band.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	_hud_band.offset_bottom = _hud_height
 	_hud_band.mouse_filter = Control.MOUSE_FILTER_STOP
+	var hud_box := StyleBoxFlat.new()
+	hud_box.bg_color = Color(0.09, 0.1, 0.15, 0.94)
+	hud_box.border_color = Color(0.35, 0.38, 0.5, 0.35)
+	hud_box.set_border_width_all(1)
+	hud_box.corner_radius_bottom_left = 14
+	hud_box.corner_radius_bottom_right = 14
+	hud_box.shadow_size = 6
+	hud_box.shadow_color = Color(0, 0, 0, 0.4)
+	_hud_band.add_theme_stylebox_override("panel", hud_box)
 	add_child(_hud_band)
 	var margin := MarginContainer.new()
 	margin.add_theme_constant_override("margin_left", 12)
@@ -119,7 +136,7 @@ func _build_hud() -> void:
 	_power_bar = ProgressBar.new()
 	_power_bar.min_value = 0
 	_power_bar.max_value = 100
-	_power_bar.custom_minimum_size = Vector2(200, 26)
+	_power_bar.custom_minimum_size = Vector2(280, 34)
 	_power_bar.show_percentage = false
 	var fill := StyleBoxFlat.new()
 	fill.bg_color = Color(0.35, 0.9, 0.45)
@@ -163,13 +180,13 @@ func _build_overlay() -> void:
 	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_overlay.add_child(panel)
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_overlay.add_child(center)
 	_overlay_card = PanelContainer.new()
-	_overlay_card.set_anchors_preset(Control.PRESET_CENTER)
-	_overlay_card.offset_left = -180
-	_overlay_card.offset_right = 180
-	_overlay_card.offset_top = -120
-	_overlay_card.offset_bottom = 120
 	_overlay_card.mouse_filter = Control.MOUSE_FILTER_STOP
+	_overlay_card.custom_minimum_size = Vector2(320, 180)
 	var card_box := StyleBoxFlat.new()
 	card_box.bg_color = Color(0.16, 0.18, 0.24, 0.95)
 	card_box.corner_radius_top_left = 16
@@ -178,7 +195,7 @@ func _build_overlay() -> void:
 	card_box.corner_radius_bottom_right = 16
 	card_box.shadow_size = 8
 	_overlay_card.add_theme_stylebox_override("panel", card_box)
-	_overlay.add_child(_overlay_card)
+	center.add_child(_overlay_card)
 	var vb := VBoxContainer.new()
 	vb.add_theme_constant_override("separation", 18)
 	_overlay_card.add_child(vb)

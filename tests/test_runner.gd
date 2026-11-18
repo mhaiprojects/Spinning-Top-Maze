@@ -61,6 +61,8 @@ func _run() -> void:
 	await test_playability_flow()
 	print("== Wave overlay flow ==")
 	await test_wave_overlay_flow()
+	print("== Overlay centering ==")
+	await test_overlay_centered()
 	print("\nRESULT: %d passed, %d failed" % [passed, failed])
 
 
@@ -88,6 +90,7 @@ func test_difficulty_ramp() -> void:
 	avg_w1 /= 6.0
 	avg_w10 /= 6.0
 	check(avg_w10 > avg_w1 + 5.0, "wall count ramp w1 %.0f -> w10 %.0f" % [avg_w1, avg_w10])
+	check(avg_w1 >= 10.0, "wave 1 has readable maze walls (avg %.1f)" % avg_w1)
 
 
 func test_maze_paths() -> void:
@@ -349,6 +352,43 @@ func test_playability_flow() -> void:
 		tin.call("clear_test_steer_vector")
 	inst.queue_free()
 	await process_frame
+
+
+func test_overlay_centered() -> void:
+	var scene: PackedScene = load("res://scenes/main.tscn")
+	for sz in [Vector2i(720, 1280), Vector2i(450, 800)]:
+		DisplayServer.window_set_size(sz)
+		var inst := scene.instantiate()
+		root.add_child(inst)
+		for i in 20:
+			await process_frame
+		var main: Node = inst
+		var ui: Node = inst.get_node("UI")
+		if main.has_method("_on_viewport_changed"):
+			main.call("_on_viewport_changed")
+		for i in 10:
+			await process_frame
+		main.call("_begin_run", 90.0)
+		for i in 8:
+			await process_frame
+		var top: SpinningTop = _find_main_child(main, SpinningTop) as SpinningTop
+		main.call("_finish_goal", top)
+		for i in 12:
+			await process_frame
+		check(ui.overlay_visible(), "overlay visible at %s" % sz)
+		var vp: Rect2 = inst.get_viewport().get_visible_rect()
+		var card: Rect2 = ui.call("overlay_card_rect") as Rect2
+		var err: float = card.get_center().distance_to(vp.get_center())
+		check(err < 8.0, "overlay cleared centered %dx%d err=%.1f" % [sz.x, sz.y, err])
+		ui.call("on_fell_over")
+		for i in 8:
+			await process_frame
+		card = ui.call("overlay_card_rect") as Rect2
+		err = card.get_center().distance_to(vp.get_center())
+		check(err < 8.0, "overlay fell centered %dx%d err=%.1f" % [sz.x, sz.y, err])
+		inst.queue_free()
+		await process_frame
+	DisplayServer.window_set_size(Vector2i(720, 1280))
 
 
 func test_wave_overlay_flow() -> void:

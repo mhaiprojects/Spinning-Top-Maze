@@ -4,6 +4,7 @@ extends CanvasLayer
 const BTN_H := 64.0
 const FONT_SZ := 22
 const VT := preload("res://scripts/visual_theme.gd")
+const DifficultyStars := preload("res://scripts/difficulty_stars.gd")
 
 var _vp_size := Vector2(720, 1280)
 var _play_rect := Rect2()
@@ -12,7 +13,7 @@ var _hud_height := 228.0
 var _power_bar: ProgressBar
 var _lbl_power: Label
 var _lbl_wave: Label
-var _lbl_diff: Label
+var _diff_stars: DifficultyStars
 var _lbl_tilt: Label
 var _lbl_msg: Label
 var _btn_cal: Button
@@ -122,9 +123,8 @@ func _build_hud() -> void:
 	margin.add_child(v)
 	_lbl_wave = _label("Wave 1")
 	v.add_child(_lbl_wave)
-	_lbl_diff = _label("★☆☆☆☆ Easy")
-	_lbl_diff.add_theme_color_override("font_color", Color(0.75, 0.85, 1.0))
-	v.add_child(_lbl_diff)
+	_diff_stars = DifficultyStars.new()
+	v.add_child(_diff_stars)
 	_lbl_tilt = _label("Input: Mouse")
 	v.add_child(_lbl_tilt)
 	_lbl_msg = _label("")
@@ -281,10 +281,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _wave_header(w: int) -> void:
 	var p: Dictionary = Difficulty.params_for_wave(w)
-	var stars := ""
-	for i in 5:
-		stars += "★" if i < int(p.stars) else "☆"
-	_lbl_diff.text = "%s %s" % [stars, p.difficulty_label]
+	_diff_stars.set_rating(int(p.stars), str(p.difficulty_label))
 
 
 func on_phase_intro(w: int) -> void:

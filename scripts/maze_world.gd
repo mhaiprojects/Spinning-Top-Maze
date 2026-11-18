@@ -4,18 +4,28 @@ extends Node2D
 
 const WALL_GROUP := "maze_wall"
 const HAZARD_GROUP := "hazard_zone"
+const PlayBg := preload("res://scripts/play_background.gd")
 
 var maze_data: Dictionary = {}
 var _play_rect := Rect2()
 var _cell_size := Vector2.ONE
 var _goal_pulse := 0.0
 var _wall_thick := 16.0
+var play_background_id: int = PlayBg.Id.TABLETOP
+var _floor_tex: ImageTexture
+
+
+func set_play_background(id: int) -> void:
+	play_background_id = PlayBg.from_saved(id)
+	_floor_tex = null
+	queue_redraw()
 
 
 func build(data: Dictionary, play_rect: Rect2) -> void:
 	_clear_maze_now()
 	maze_data = data
 	_play_rect = play_rect
+	_floor_tex = null
 	var cols: int = data.cols
 	var rows: int = data.rows
 	_cell_size = Vector2(play_rect.size.x / float(cols), play_rect.size.y / float(rows))
@@ -136,36 +146,27 @@ func _draw() -> void:
 	_draw_goal_pad()
 
 
+func _floor_texture() -> ImageTexture:
+	if _floor_tex == null:
+		_floor_tex = PlayBg.texture_for_size(play_background_id, _play_rect.size)
+	return _floor_tex
+
+
 func _draw_background() -> void:
-	var top_c := Color(0.04, 0.07, 0.2)
-	var bot_c := Color(0.22, 0.08, 0.26)
-	var steps := 24
-	for i in steps:
-		var t: float = float(i) / float(steps)
-		var y0: float = lerpf(_play_rect.position.y, _play_rect.end.y, t)
-		var y1: float = lerpf(_play_rect.position.y, _play_rect.end.y, float(i + 1) / float(steps))
-		draw_rect(Rect2(_play_rect.position.x, y0, _play_rect.size.x, y1 - y0 + 1.0), top_c.lerp(bot_c, t))
-	var dot_step: float = maxf(16.0, _cell_size.x * 0.28)
-	var gx: float = _play_rect.position.x + dot_step * 0.5
-	while gx < _play_rect.end.x:
-		var gy: float = _play_rect.position.y + dot_step * 0.5
-		while gy < _play_rect.end.y:
-			draw_circle(Vector2(gx, gy), 1.4, Color(0.85, 0.75, 1.0, 0.045))
-			gy += dot_step
-		gx += dot_step
-	var cx: float = _play_rect.get_center().x
-	var cy: float = _play_rect.get_center().y
-	var max_r: float = _play_rect.size.length() * 0.55
-	for ring in 6:
-		var t: float = float(ring) / 6.0
-		var r: float = lerpf(max_r * 0.35, max_r, t)
-		var alpha: float = lerpf(0.16, 0.0, t)
-		draw_arc(Vector2(cx, cy), r, 0, TAU, 48, Color(0, 0, 0, alpha), 18.0, true)
+	var tex: ImageTexture = _floor_texture()
+	draw_texture_rect(tex, _play_rect, false)
+	var style: Dictionary = PlayBg.wall_style(play_background_id)
+	var vig: Color = style.vignette
+	if vig.a > 0.001:
+		draw_rect(_play_rect, vig)
 
 
 func _draw_cell_shading() -> void:
+	if play_background_id == PlayBg.Id.CHOPPING:
+		return
 	var cols: int = maze_data.cols
 	var rows: int = maze_data.rows
+	var style: Dictionary = PlayBg.wall_style(play_background_id)
 	for y in rows:
 		for x in cols:
 			var r := Rect2(
@@ -174,17 +175,17 @@ func _draw_cell_shading() -> void:
 				_cell_size.x,
 				_cell_size.y
 			)
-			var tint := Color(1, 1, 1, 0.03 if (x + y) % 2 == 0 else 0.06)
+			var tint: Color = style.cell_a if (x + y) % 2 == 0 else style.cell_b
 			draw_rect(r, tint)
-			draw_rect(r, Color(0.7, 0.65, 0.95, 0.035), false, 1.0)
 
 
 func _draw_walls() -> void:
 	var wt: float = _wall_thick
-	var fill_top := Color(0.62, 0.66, 0.78)
-	var fill_bot := Color(0.38, 0.4, 0.5)
-	var shadow_col := Color(0.05, 0.06, 0.1, 0.65)
-	var hi_col := Color(0.92, 0.94, 1.0, 0.55)
+	var style: Dictionary = PlayBg.wall_style(play_background_id)
+	var fill_top: Color = style.fill_top
+	var fill_bot: Color = style.fill_bot
+	var shadow_col: Color = style.shadow
+	var hi_col: Color = style.hi
 	var cap_r: float = wt * 0.5 + 1.0
 	for seg in maze_data.walls:
 		var a: Vector2 = seg.a
@@ -222,11 +223,12 @@ func _draw_hazards() -> void:
 
 
 func _draw_start_pad() -> void:
+	var pads: Dictionary = PlayBg.pad_style(play_background_id)
 	var start_r: Rect2 = start_area_rect()
 	var c: Vector2 = start_r.get_center()
 	draw_circle(c + Vector2(3, 4), start_r.size.x * 0.42, Color(0, 0, 0, 0.25))
-	draw_rect(start_r, Color(0.12, 0.28, 0.55, 0.55))
-	draw_rect(start_r, Color(0.45, 0.65, 1.0, 0.85), false, 3.0)
+	draw_rect(start_r, pads.start_fill)
+	draw_rect(start_r, pads.start_border, false, 3.0)
 	draw_string(
 		ThemeDB.fallback_font,
 		c + Vector2(-22, 8),
@@ -247,8 +249,9 @@ func _draw_goal_pad() -> void:
 		var alpha: float = 0.22 - float(ring_i) * 0.05
 		draw_arc(gc, rr, 0, TAU, 32, Color(0.15, 0.95, 0.55, alpha + pulse * 0.08), 4.0, true)
 	draw_circle(gc + Vector2(0, 4), goal_r.size.x * 0.38, Color(0, 0, 0, 0.2))
-	draw_rect(goal_r, Color(0.1, 0.42, 0.32, 0.65))
-	draw_rect(goal_r, Color(0.25, 1.0, 0.72, 0.35 + pulse * 0.45), false, 3.0)
+	var pads: Dictionary = PlayBg.pad_style(play_background_id)
+	draw_rect(goal_r, pads.goal_fill)
+	draw_rect(goal_r, Color(pads.goal_border.r, pads.goal_border.g, pads.goal_border.b, pads.goal_border.a + pulse * 0.45), false, 3.0)
 	var flag_h: float = goal_r.size.y * 0.55
 	draw_line(gc + Vector2(0, -goal_r.size.y * 0.35), gc + Vector2(0, -goal_r.size.y * 0.35 + flag_h), Color(0.95, 0.95, 1.0), 3.0)
 	var tip := gc + Vector2(6, -goal_r.size.y * 0.35 + 4)

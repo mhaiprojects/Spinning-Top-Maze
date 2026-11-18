@@ -129,13 +129,8 @@ static func rotate_for_screen(v: Vector2, angle_deg: float) -> Vector2:
 
 
 static func save_mode(path: String, mode: int) -> bool:
-	var cfg := ConfigFile.new()
-	cfg.set_value("input", "mode", mode)
-	return cfg.save(path) == OK
+	return UserSettings.save_input_mode(path, mode)
 
 
 static func load_mode(path: String) -> int:
-	var cfg := ConfigFile.new()
-	if cfg.load(path) != OK:
-		return -1
-	return mode_from_saved(cfg.get_value("input", "mode", -1))
+	return mode_from_saved(UserSettings.load_input_mode(path))

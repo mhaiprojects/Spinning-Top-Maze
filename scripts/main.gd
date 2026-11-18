@@ -3,8 +3,9 @@ extends Node2D
 
 enum Phase { LAUNCH, RUN, CLEARED, FELL, PAUSED }
 
-const HUD_H := 120.0
-const BOTTOM_H := 100.0
+const BASE_TOP_H := 228.0
+const BASE_BOTTOM_H := 140.0
+const MARGIN := 10.0
 
 var phase: Phase = Phase.LAUNCH
 var wave: int = 1
@@ -19,11 +20,13 @@ var _play_rect := Rect2()
 
 
 func _ready() -> void:
-	var stick := CanvasLayer.new()
-	stick.name = "DragStick"
-	stick.set_script(load("res://scripts/drag_stick_overlay.gd"))
-	stick.layer = 5
-	add_child(stick)
+	var layer := CanvasLayer.new()
+	layer.name = "DragStick"
+	layer.layer = 5
+	var stick := DragStickOverlay.new()
+	stick.name = "Draw"
+	layer.add_child(stick)
+	add_child(layer)
 	_maze = MazeWorld.new()
 	add_child(_maze)
 	_top = SpinningTop.new()
@@ -45,9 +48,13 @@ func _ready() -> void:
 	_goal.monitorable = false
 	add_child(_goal)
 	_new_wave_seed()
-	_start_launch()
 	get_viewport().size_changed.connect(_on_viewport_changed)
-	call_deferred("_layout_all")
+	call_deferred("_bootstrap")
+
+
+func _bootstrap() -> void:
+	_layout_all()
+	_start_launch()
 
 
 func _process(_delta: float) -> void:
@@ -66,16 +73,41 @@ func _update_steer_block() -> void:
 
 func _on_viewport_changed() -> void:
 	_layout_all()
+	if phase == Phase.LAUNCH:
+		_position_launch_bar()
 
 
 func _layout_all() -> void:
 	var vp: Rect2 = get_viewport().get_visible_rect()
-	var top_h: float = HUD_H
-	var bot_h: float = BOTTOM_H
-	_play_rect = Rect2(8, top_h, vp.size.x - 16, vp.size.y - top_h - bot_h)
-	_maze.build(_maze.maze_data if not _maze.maze_data.is_empty() else MazeGen.generate(wave, maze_seed), _play_rect)
+	var sy: float = vp.size.y / 1280.0
+	var top_h: float = BASE_TOP_H * sy
+	var bot_h: float = BASE_BOTTOM_H * sy
+	_play_rect = Rect2(
+		MARGIN,
+		top_h,
+		vp.size.x - MARGIN * 2.0,
+		maxf(80.0, vp.size.y - top_h - bot_h)
+	)
 	if _ui.has_method("set_layout_rects"):
-		_ui.set_layout_rects(vp.size, _play_rect)
+		_ui.set_layout_rects(vp.size, _play_rect, top_h, bot_h)
+	_generate_maze_data_only()
+	if not _maze.maze_data.is_empty():
+		_maze.build(_maze.maze_data, _play_rect)
+		_position_goal()
+	_position_launch_bar()
+
+
+func _scaled_top_h() -> float:
+	return BASE_TOP_H * (get_viewport().get_visible_rect().size.y / 1280.0)
+
+
+func _scaled_bottom_h() -> float:
+	return BASE_BOTTOM_H * (get_viewport().get_visible_rect().size.y / 1280.0)
+
+
+func _generate_maze_data_only() -> void:
+	var data: Dictionary = MazeGen.generate(wave, maze_seed)
+	_maze.maze_data = data
 
 
 func _new_wave_seed() -> void:
@@ -87,40 +119,77 @@ func _new_wave_seed() -> void:
 func _generate_maze() -> void:
 	var data: Dictionary = MazeGen.generate(wave, maze_seed)
 	_maze.build(data, _play_rect)
+	_position_goal()
+	_position_launch_bar()
+
+
+func _position_goal() -> void:
+	if _maze.maze_data.is_empty():
+		return
 	_goal.global_position = _maze.goal_area_rect().get_center()
 	var gs: RectangleShape2D = _goal.get_child(0).shape as RectangleShape2D
-	gs.size = _maze.goal_area_rect().size * 0.9
+	gs.size = _maze.goal_area_rect().size * 0.85
+
+
+func _position_launch_bar() -> void:
+	if _play_rect.size.x < 1.0:
+		return
+	var vp: Rect2 = get_viewport().get_visible_rect()
+	var bot_h: float = _scaled_bottom_h()
+	var bar := Rect2(
+		_play_rect.position.x + 16,
+		vp.size.y - bot_h + 12,
+		_play_rect.size.x - 32,
+		maxf(48.0, bot_h - 24)
+	)
+	if phase == Phase.LAUNCH and _launch.active:
+		_launch.setup(bar, wave)
 
 
 func _start_launch() -> void:
 	phase = Phase.LAUNCH
 	_generate_maze()
 	_top.visible = false
-	_top.freeze = true
-	var bar := Rect2(_play_rect.position.x + 24, _play_rect.end.y + 18, _play_rect.size.x - 48, 56)
+	_top.set_run_active(false)
+	_top.global_position = Vector2(-4000, -4000)
+	var vp: Rect2 = get_viewport().get_visible_rect()
+	var bot_h: float = _scaled_bottom_h()
+	var bar := Rect2(
+		_play_rect.position.x + 16,
+		vp.size.y - bot_h + 12,
+		_play_rect.size.x - 32,
+		maxf(48.0, bot_h - 24)
+	)
 	_launch.setup(bar, wave)
+	_launch.visible = true
 	if _ui.has_method("on_phase_launch"):
 		_ui.on_phase_launch(wave)
 
 
 func _on_launch_released(power: float) -> void:
-	_begin_run(power)
+	call_deferred("_begin_run", power)
 
 
 func _begin_run(power: float) -> void:
 	phase = Phase.RUN
 	_top.visible = true
-	_top.freeze = false
+	_launch.visible = false
+	_launch.cancel()
 	_top.reset_top(_maze.start_position(), power)
+	_top.set_run_active(true)
 	if _ui.has_method("on_phase_run"):
-		_ui.on_phase_run()
+		_ui.on_phase_run(wave)
 
 
 func _on_fell_over() -> void:
 	if phase != Phase.RUN:
 		return
 	phase = Phase.FELL
-	_top.freeze = true
+	call_deferred("_finish_fell_over")
+
+
+func _finish_fell_over() -> void:
+	_top.set_run_active(false)
 	if _ui.has_method("on_fell_over"):
 		_ui.on_fell_over()
 
@@ -128,20 +197,26 @@ func _on_fell_over() -> void:
 func _on_goal_body(body: Node) -> void:
 	if phase != Phase.RUN or body != _top:
 		return
+	call_deferred("_finish_goal", body)
+
+
+func _finish_goal(_body: Node) -> void:
+	if phase != Phase.RUN:
+		return
 	phase = Phase.CLEARED
-	_top.freeze = true
+	_top.set_run_active(false)
 	if _ui.has_method("on_wave_cleared"):
 		_ui.on_wave_cleared(wave)
 
 
 func request_retry_same_wave() -> void:
-	_start_launch()
+	call_deferred("_start_launch")
 
 
 func advance_wave() -> void:
 	wave += 1
 	_new_wave_seed()
-	_start_launch()
+	call_deferred("_start_launch")
 
 
 func toggle_pause() -> void:

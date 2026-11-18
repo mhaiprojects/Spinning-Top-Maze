@@ -1,34 +1,32 @@
 class_name DragStickOverlay
-extends CanvasLayer
-## Virtual-stick indicator for drag steering mode.
+extends Control
+## Virtual-stick indicator drawn on a full-screen Control (child of CanvasLayer).
 
 const IM := preload("res://scripts/input_modes.gd")
 
 var _origin := Vector2.ZERO
 var _pointer := Vector2.ZERO
-var _active := false
 var _visible_stick := false
+
+
+func _ready() -> void:
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	visible = false
 
 
 func show_stick(origin: Vector2, pointer: Vector2) -> void:
 	_origin = origin
 	_pointer = pointer
-	_active = true
 	_visible_stick = true
 	visible = true
 	queue_redraw()
 
 
 func hide_stick() -> void:
-	_active = false
 	_visible_stick = false
 	visible = false
 	queue_redraw()
-
-
-func _ready() -> void:
-	visible = false
-	layer = 5
 
 
 func _draw() -> void:

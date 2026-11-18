@@ -351,7 +351,7 @@ func _poll_web_tilt() -> void:
 
 
 func _notify_drag_overlay(on: bool) -> void:
-	var stick: Node = get_node_or_null("/root/Main/DragStick")
+	var stick: Node = get_tree().root.get_node_or_null("Main/DragStick/Draw")
 	if stick == null:
 		stick = get_tree().root.get_node_or_null("Main/DragStick")
 	if stick == null:

@@ -9,7 +9,7 @@ static func params_for_wave(wave: int) -> Dictionary:
 	var w: int = maxi(1, wave)
 	var cols: int = clampi(3 + ((w - 1) * 7) / 9, 3, 10)
 	var rows: int = clampi(4 + ((w - 1) * 10) / 9, 4, 14)
-	var extra_remove: float = clampf(0.52 - float(w - 1) * 0.035, 0.04, 0.52)
+	var extra_remove: float = clampf(0.32 - float(w - 1) * 0.028, 0.04, 0.32)
 	var wall_hit_mult: float = 1.0 + float(w - 1) * 0.06
 	var spin_decay: float = 2.2 + float(w - 1) * 0.12
 	var marker_speed: float = 1.45 + float(w - 1) * 0.08
@@ -38,7 +38,7 @@ static func metric_keys_monotonic() -> Array[String]:
 
 static func is_easy_wave_1() -> bool:
 	var p: Dictionary = params_for_wave(1)
-	return p.cols == 3 and p.rows == 4 and p.extra_wall_remove >= 0.45
+	return p.cols == 3 and p.rows == 4 and p.extra_wall_remove >= 0.28
 
 
 static func format_table_row(wave: int) -> String:

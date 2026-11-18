@@ -72,8 +72,12 @@ static func generate(wave: int, seed_val: int) -> Dictionary:
 			for dir_i in 4:
 				if not room_walls[y][x][dir_i]:
 					continue
+				if _is_perimeter_wall(x, y, dir_i, cols, rows):
+					continue
 				if rng.randf() < remove_chance:
 					_remove_wall_between_dir(room_walls, x, y, dir_i, cols, rows)
+
+	_force_perimeter_walls(room_walls, cols, rows)
 
 	var cells: Array = []
 	for y in rows:
@@ -102,6 +106,27 @@ static func generate(wave: int, seed_val: int) -> Dictionary:
 
 static func _opposite(dir_i: int) -> int:
 	return (dir_i + 2) % 4
+
+
+static func _is_perimeter_wall(x: int, y: int, dir_i: int, cols: int, rows: int) -> bool:
+	if dir_i == W_N and y == 0:
+		return true
+	if dir_i == W_S and y == rows - 1:
+		return true
+	if dir_i == W_W and x == 0:
+		return true
+	if dir_i == W_E and x == cols - 1:
+		return true
+	return false
+
+
+static func _force_perimeter_walls(room_walls: Array, cols: int, rows: int) -> void:
+	for x in cols:
+		room_walls[0][x][W_N] = true
+		room_walls[rows - 1][x][W_S] = true
+	for y in rows:
+		room_walls[y][0][W_W] = true
+		room_walls[y][cols - 1][W_E] = true
 
 
 static func _remove_wall_between(walls: Array, a: Vector2i, b: Vector2i, dir_from_a: int) -> void:

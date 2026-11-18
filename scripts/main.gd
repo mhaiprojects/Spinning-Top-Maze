@@ -19,6 +19,11 @@ var _play_rect := Rect2()
 
 
 func _ready() -> void:
+	var stick := CanvasLayer.new()
+	stick.name = "DragStick"
+	stick.set_script(load("res://scripts/drag_stick_overlay.gd"))
+	stick.layer = 5
+	add_child(stick)
 	_maze = MazeWorld.new()
 	add_child(_maze)
 	_top = SpinningTop.new()
@@ -43,6 +48,20 @@ func _ready() -> void:
 	_start_launch()
 	get_viewport().size_changed.connect(_on_viewport_changed)
 	call_deferred("_layout_all")
+
+
+func _process(_delta: float) -> void:
+	_update_steer_block()
+
+
+func _update_steer_block() -> void:
+	var tin: Node = get_node_or_null("/root/TiltInput")
+	if tin == null or not tin.has_method("set_steer_blocked"):
+		return
+	var blocked: bool = phase != Phase.RUN
+	if _ui.has_method("overlay_visible") and _ui.overlay_visible():
+		blocked = true
+	tin.call("set_steer_blocked", blocked)
 
 
 func _on_viewport_changed() -> void:
@@ -116,7 +135,6 @@ func _on_goal_body(body: Node) -> void:
 
 
 func request_retry_same_wave() -> void:
-	maze_seed = maze_seed
 	_start_launch()
 
 
@@ -135,17 +153,37 @@ func toggle_pause() -> void:
 		get_tree().paused = false
 
 
-func _unhandled_input(event: InputEvent) -> void:
-	var tilt: Node = get_node_or_null("/root/TiltInput")
-	if tilt and tilt.has_method("handle_input"):
-		tilt.call("handle_input", event)
-	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_SPACE:
-		if phase == Phase.LAUNCH:
-			_launch.try_release()
-	if event is InputEventScreenTouch and event.pressed and phase == Phase.LAUNCH:
+func _try_launch_release() -> void:
+	if phase == Phase.LAUNCH:
 		_launch.try_release()
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		if phase == Phase.LAUNCH:
-			_launch.try_release()
-	if _ui.has_method("forward_input"):
-		_ui.forward_input(event)
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_SPACE:
+		_try_launch_release()
+		return
+
+	var screen_pos := Vector2.ZERO
+	if event is InputEventScreenTouch:
+		screen_pos = event.position
+		if event.pressed:
+			if _ui.has_method("consumes_steering_at") and _ui.consumes_steering_at(screen_pos):
+				return
+			if phase == Phase.LAUNCH:
+				_try_launch_release()
+				var tin: Node = get_node_or_null("/root/TiltInput")
+				if tin and tin.has_method("request_web_permission"):
+					tin.call("request_web_permission")
+				return
+	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		screen_pos = event.position
+		if event.pressed:
+			if _ui.has_method("consumes_steering_at") and _ui.consumes_steering_at(screen_pos):
+				return
+			if phase == Phase.LAUNCH:
+				_try_launch_release()
+				return
+
+	var tin: Node = get_node_or_null("/root/TiltInput")
+	if tin and tin.has_method("handle_input"):
+		tin.call("handle_input", event)

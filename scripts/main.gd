@@ -1,7 +1,9 @@
 extends Node2D
 ## Wave flow: maze, launch, run, goal / fall over.
 
-enum Phase { LAUNCH, RUN, CLEARED, FELL, PAUSED }
+const LaunchIntroScene := preload("res://scripts/launch_intro.gd")
+
+enum Phase { INTRO, LAUNCH, RUN, GOAL_FALL, CLEARED, FELL, PAUSED }
 
 const BASE_TOP_H := 228.0
 const BASE_BOTTOM_H := 140.0
@@ -18,6 +20,7 @@ var _play_rect := Rect2()
 var _overlay_busy := false
 var _shake := 0.0
 var _base_position := Vector2.ZERO
+var _intro: Control
 
 @onready var _ui: CanvasLayer = $UI
 
@@ -36,7 +39,15 @@ func _ready() -> void:
 	_top = SpinningTop.new()
 	add_child(_top)
 	_top.fell_over.connect(_on_fell_over)
+	_top.victory_complete.connect(_on_victory_complete)
 	_top.hit_wall.connect(_on_top_hit_wall)
+	var intro_layer := CanvasLayer.new()
+	intro_layer.name = "LaunchIntroLayer"
+	intro_layer.layer = 8
+	_intro = LaunchIntroScene.new()
+	intro_layer.add_child(_intro)
+	add_child(intro_layer)
+	_intro.finished.connect(_on_intro_finished)
 	_launch = LaunchMinigame.new()
 	add_child(_launch)
 	_launch.released.connect(_on_launch_released)
@@ -80,7 +91,7 @@ func _update_steer_block() -> void:
 	var tin: Node = get_node_or_null("/root/TiltInput")
 	if tin == null or not tin.has_method("set_steer_blocked"):
 		return
-	var blocked: bool = phase != Phase.RUN or _overlay_busy
+	var blocked: bool = phase != Phase.RUN or _overlay_busy or phase == Phase.GOAL_FALL
 	if _ui.has_method("overlay_visible") and _ui.overlay_visible():
 		blocked = true
 	tin.call("set_steer_blocked", blocked)
@@ -159,24 +170,16 @@ func _position_launch_bar() -> void:
 
 func _start_launch() -> void:
 	_overlay_busy = false
-	phase = Phase.LAUNCH
 	_set_goal_active(false)
 	_generate_maze()
 	_top.visible = false
 	_top.set_run_active(false)
 	_top.global_position = Vector2(-4000, -4000)
-	var vp: Rect2 = get_viewport().get_visible_rect()
-	var bot_h: float = BASE_BOTTOM_H * (vp.size.y / 1280.0)
-	var bar := Rect2(
-		_play_rect.position.x + 16,
-		vp.size.y - bot_h + 12,
-		_play_rect.size.x - 32,
-		maxf(48.0, bot_h - 24)
-	)
-	_launch.setup(bar, wave)
-	_launch.visible = true
-	if _ui.has_method("on_phase_launch"):
-		_ui.on_phase_launch(wave)
+	_launch.visible = false
+	phase = Phase.INTRO
+	if _ui.has_method("on_phase_intro"):
+		_ui.on_phase_intro(wave)
+	_intro.start_at(_maze.start_position())
 
 
 func _on_launch_released(power: float) -> void:
@@ -197,11 +200,39 @@ func _begin_run(power: float) -> void:
 		_ui.on_phase_run(wave)
 
 
+func _on_intro_finished() -> void:
+	if phase != Phase.INTRO:
+		return
+	phase = Phase.LAUNCH
+	var vp: Rect2 = get_viewport().get_visible_rect()
+	var bot_h: float = BASE_BOTTOM_H * (vp.size.y / 1280.0)
+	var bar := Rect2(
+		_play_rect.position.x + 16,
+		vp.size.y - bot_h + 12,
+		_play_rect.size.x - 32,
+		maxf(48.0, bot_h - 24)
+	)
+	_launch.setup(bar, wave)
+	_launch.visible = true
+	if _ui.has_method("on_phase_launch"):
+		_ui.on_phase_launch(wave)
+
+
 func _on_fell_over() -> void:
 	if phase != Phase.RUN:
 		return
 	phase = Phase.FELL
 	call_deferred("_finish_fell_over")
+
+
+func _on_victory_complete() -> void:
+	if phase != Phase.GOAL_FALL:
+		return
+	phase = Phase.CLEARED
+	_top.set_run_active(false)
+	_overlay_busy = true
+	if _ui.has_method("on_wave_cleared"):
+		_ui.on_wave_cleared(wave)
 
 
 func _finish_fell_over() -> void:
@@ -222,11 +253,8 @@ func _finish_goal(_body: Node) -> void:
 	if phase != Phase.RUN:
 		return
 	_set_goal_active(false)
-	phase = Phase.CLEARED
-	_top.set_run_active(false)
-	_overlay_busy = true
-	if _ui.has_method("on_wave_cleared"):
-		_ui.on_wave_cleared(wave)
+	phase = Phase.GOAL_FALL
+	_top.start_goal_victory(_maze.goal_area_rect().get_center())
 
 
 func request_retry_same_wave() -> void:
@@ -288,9 +316,21 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_SPACE:
+		if phase == Phase.INTRO:
+			_intro.skip()
+			get_viewport().set_input_as_handled()
+			return
 		if phase == Phase.LAUNCH:
 			_try_launch_release()
 		return
+	if phase == Phase.INTRO:
+		if (
+			(event is InputEventScreenTouch and event.pressed)
+			or (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT)
+		):
+			_intro.skip()
+			get_viewport().set_input_as_handled()
+			return
 
 	var screen_pos := Vector2.ZERO
 	if event is InputEventScreenTouch:

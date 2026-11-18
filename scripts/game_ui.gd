@@ -287,6 +287,12 @@ func _wave_header(w: int) -> void:
 	_lbl_diff.text = "%s %s" % [stars, p.difficulty_label]
 
 
+func on_phase_intro(w: int) -> void:
+	_lbl_wave.text = "Wave %d — Wind-up… (tap to skip)" % w
+	_wave_header(w)
+	_hide_overlay()
+
+
 func on_phase_launch(w: int) -> void:
 	_lbl_wave.text = "Wave %d — Launch! (Space / tap bar)" % w
 	_wave_header(w)

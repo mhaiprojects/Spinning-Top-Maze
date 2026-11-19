@@ -38,6 +38,9 @@ var _trail_line: Line2D
 var _spark: CPUParticles2D
 var _spark_flash: CPUParticles2D
 var _dbg_tick := 0.0
+var _lean := Vector2.ZERO
+var _precess_phase := 0.0
+var _settings_rev := -1
 
 
 func _ready() -> void:
@@ -91,6 +94,7 @@ func _ready() -> void:
 	_spark_flash.color = Color(1, 1, 1)
 	add_child(_spark_flash)
 	z_index = 10
+	_sync_physics_tunables()
 	set_run_active(false)
 
 
@@ -123,6 +127,8 @@ func wake_for_run() -> void:
 	_fall_kind = FallKind.NONE
 	_falling = false
 	_fall_t = 0.0
+	_lean = Vector2.ZERO
+	_precess_phase = 0.0
 	_run_active = true
 	collision_layer = 1
 	collision_mask = 6
@@ -201,8 +207,14 @@ func _physics_process(delta: float) -> void:
 	if _fall_kind == FallKind.NONE and freeze:
 		freeze = false
 		sleeping = false
-	spin_power = maxf(0.0, spin_power - _decay_rate * delta)
+	_sync_physics_tunables()
+	var decay_mult: float = PhysicsSettings.get_value("spin_decay_mult")
+	spin_power = maxf(0.0, spin_power - _decay_rate * decay_mult * delta)
 	power_changed.emit(spin_power)
+	var fall_thr: float = PhysicsSettings.get_value("fall_threshold")
+	if fall_thr > 0.01 and spin_power <= fall_thr:
+		_begin_power_fall()
+		return
 	if spin_power <= 0.0:
 		_begin_power_fall()
 		return
@@ -210,12 +222,33 @@ func _physics_process(delta: float) -> void:
 	if tin and tin.has_method("set_top_world_position"):
 		tin.call("set_top_world_position", global_position)
 	var tilt: Vector2 = _tilt_vector()
-	if tilt.length_squared() > 0.0001:
+	var shaped: Vector2 = TopPhysics.shape_input(tilt)
+	var lean_max_rad: float = deg_to_rad(PhysicsSettings.get_value("lean_max_deg"))
+	var hi_scale: float = maxf(PhysicsSettings.get_value("high_scale"), 0.01)
+	var target_lean: Vector2 = shaped * (lean_max_rad / hi_scale)
+	var stiffness: float = PhysicsSettings.get_value("lean_stiffness")
+	_lean = TopPhysics.spring_lean(_lean, target_lean, stiffness, delta)
+	var spin_norm: float = maxf(spin_power / 100.0, 0.15)
+	var spin_sign: float = signf(angular_velocity)
+	if absf(spin_sign) < 0.01:
+		spin_sign = 1.0
+	var prec_rate: float = PhysicsSettings.get_value("precession_rate")
+	_lean = TopPhysics.apply_precession(_lean, spin_norm, prec_rate, delta, spin_sign)
+	if prec_rate > 0.0001:
+		_precess_phase += prec_rate * _lean.length() / spin_norm * delta * spin_sign
+	var lean_len: float = _lean.length()
+	if lean_len > 0.0001:
 		if sleeping:
 			sleeping = false
-		apply_central_force(tilt * STEER_FORCE * (0.35 + 0.65 * spin_power / 100.0))
-	if linear_velocity.length() > MAX_LINEAR_SPEED:
-		linear_velocity = linear_velocity.normalized() * MAX_LINEAR_SPEED
+		var lean_cap: float = maxf(lean_max_rad, 0.001)
+		var steer_f: float = PhysicsSettings.get_value("steer_force")
+		var force_mag: float = (
+			(lean_len / lean_cap) * steer_f * (0.35 + 0.65 * spin_power / 100.0)
+		)
+		apply_central_force(_lean.normalized() * force_mag)
+	var max_sp: float = PhysicsSettings.get_value("max_speed")
+	if linear_velocity.length() > max_sp:
+		linear_velocity = linear_velocity.normalized() * max_sp
 	_wobble_phase += delta * (8.0 + spin_power * 0.12)
 	var spin_rate: float = (spin_power / 100.0) * 24.0
 	angular_velocity = lerp(angular_velocity, spin_rate, 0.15)
@@ -240,6 +273,18 @@ func _debug_motion(delta: float) -> void:
 func _clear_trail() -> void:
 	_trail.clear()
 	_trail_line.clear_points()
+
+
+func _sync_physics_tunables() -> void:
+	var rev: int = PhysicsSettings.revision()
+	if rev == _settings_rev:
+		return
+	_settings_rev = rev
+	linear_damp = PhysicsSettings.get_value("linear_damp")
+
+
+func lean_vector() -> Vector2:
+	return _lean
 
 
 func _advance_goal_fall(delta: float) -> void:
@@ -319,8 +364,9 @@ func apply_wall_hit(impact_speed: float, spark_local: Vector2 = Vector2.ZERO) ->
 	if now - _last_hit_ms < HIT_COOLDOWN_MS:
 		return
 	_last_hit_ms = now
+	var loss_mult: float = PhysicsSettings.get_value("wall_hit_loss_mult")
 	var loss: float = clampf(
-		impact_speed * HIT_LOSS_SCALE * _hit_mult,
+		impact_speed * HIT_LOSS_SCALE * _hit_mult * loss_mult,
 		MIN_HIT_LOSS,
 		MAX_HIT_POWER_LOSS
 	)
@@ -332,7 +378,7 @@ func apply_wall_hit(impact_speed: float, spark_local: Vector2 = Vector2.ZERO) ->
 	_spark_flash.position = spark_local
 	_spark_flash.emitting = true
 	_spark_flash.restart()
-	linear_velocity *= HIT_VEL_SCALE
+	linear_velocity *= PhysicsSettings.get_value("wall_hit_slowdown")
 	hit_wall.emit()
 
 
@@ -369,6 +415,8 @@ func reset_top(pos: Vector2, power: float) -> void:
 	global_position = pos
 	linear_velocity = Vector2.ZERO
 	angular_velocity = 0.0
+	_lean = Vector2.ZERO
+	_precess_phase = 0.0
 	_sync_physics_body()
 	power_changed.emit(spin_power)
 	queue_redraw()
@@ -379,14 +427,30 @@ func _draw() -> void:
 	draw_set_transform(Vector2(8, 12), 0.0, shadow_scale)
 	draw_circle(Vector2.ZERO, RADIUS * 0.82, Color(0, 0, 0, 0.28))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	var lean_max_rad: float = deg_to_rad(PhysicsSettings.get_value("lean_max_deg"))
+	var lean_ratio: float = 0.0
+	if lean_max_rad > 0.001:
+		lean_ratio = clampf(_lean.length() / lean_max_rad, 0.0, 1.0)
+	var lean_dir: Vector2 = _lean.normalized() if _lean.length_squared() > 0.0001 else Vector2.ZERO
+	var lean_offset: Vector2 = lean_dir * lean_ratio * RADIUS * 0.35
 	var wobble: float = (1.0 - spin_power / 100.0) * 14.0 * sin(_wobble_phase)
-	var precess: float = wobble * 0.04
+	var precess: float = _precess_phase * 0.22 + wobble * 0.04
+	var body_off := lean_offset
+	var body_rot := precess
+	var body_scale := Vector2.ONE
+	if lean_dir.length_squared() > 0.0001:
+		body_rot += lean_dir.angle() * lean_ratio * 0.12
+		var along: float = absf(lean_dir.dot(Vector2.RIGHT))
+		body_scale = Vector2(
+			1.0 - lean_ratio * 0.14 * along,
+			1.0 - lean_ratio * 0.1 * (1.0 - along)
+		)
 	if _falling or _fall_kind == FallKind.GOAL:
 		var t: float = fall_progress()
-		precess += t * 0.9
-		draw_set_transform(Vector2.ZERO, precess, Vector2(1.0 + t * 0.25, 0.55 + t * 0.35))
-	else:
-		draw_set_transform(Vector2.ZERO, precess, Vector2.ONE)
+		body_rot += t * 0.9
+		body_off = Vector2.ZERO
+		body_scale = Vector2(1.0 + t * 0.25, 0.55 + t * 0.35)
+	draw_set_transform(body_off, body_rot, body_scale)
 	var spin_ang: float = _wobble_phase * (1.2 + spin_power * 0.02)
 	_draw_classic_body(spin_ang)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)

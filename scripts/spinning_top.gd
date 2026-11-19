@@ -242,8 +242,10 @@ func _physics_process(delta: float) -> void:
 			sleeping = false
 		var lean_cap: float = maxf(lean_max_rad, 0.001)
 		var steer_f: float = PhysicsSettings.get_value("steer_force")
+		# Lean is capped at lean_max for the art; the high tier's extra punch
+		# comes back via hi_scale so a hard tilt drives up to high_scale x steer_force.
 		var force_mag: float = (
-			(lean_len / lean_cap) * steer_f * (0.35 + 0.65 * spin_power / 100.0)
+			(lean_len / lean_cap) * hi_scale * steer_f * (0.35 + 0.65 * spin_power / 100.0)
 		)
 		apply_central_force(_lean.normalized() * force_mag)
 	var max_sp: float = PhysicsSettings.get_value("max_speed")

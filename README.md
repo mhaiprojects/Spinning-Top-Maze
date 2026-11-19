@@ -92,7 +92,7 @@ Open **Settings** on the HUD (pauses play, blocks steering). Adjust sliders or t
 | `lean_stiffness` | Lean stiffness | 10 | 1–30 | How fast lean follows input |
 | `precession_rate` | Precession rate | 2.5 | 0–10 | Gyroscopic wobble (faster when spin is low) |
 | `low_scale` | Gentle tier scale | 0.35 | 0.05–1.5 | Movement scale for light input |
-| `high_scale` | Hard tier scale | 1.6 | 0.5–4 | Movement scale for strong input |
+| `high_scale` | Hard tier scale | 1.6 | 0.5–4 | Movement scale for strong input (full input drives up to high_scale × steer_force) |
 | `tier_threshold` | Tier threshold | 0.5 | 0.1–0.9 | Input magnitude where tiers blend |
 | `tier_blend` | Tier blend width | 0.18 | 0.02–0.4 | Smoothstep width at tier cross |
 | `steer_force` | Steer force | 480 | 100–1500 | Central force at full lean |

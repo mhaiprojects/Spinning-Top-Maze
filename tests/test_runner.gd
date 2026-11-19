@@ -470,6 +470,9 @@ func test_playability_flow() -> void:
 		main.set("phase", MainScript.Phase.RUN)
 	var w1: int = Maze.wall_count(maze.maze_data)
 	var p_hit: float = top.spin_power
+	# The stronger high tier can bump a real wall during the steer phase;
+	# clear the 150 ms hit cooldown so this synthetic hit is deterministic.
+	top.set("_last_hit_ms", -100000)
 	top.apply_wall_hit(12.0)
 	check(top.spin_power < p_hit, "playability wall hit lowers power")
 	top.global_position = maze.goal_area_rect().get_center()
@@ -1189,6 +1192,22 @@ func test_physics_live_tuning() -> void:
 		await physics_frame
 	var dist_high: float = start2.distance_to(top.global_position)
 	check(dist_high > dist_base * 1.15, "higher steer_force moves further (%.0f vs %.0f)" % [dist_high, dist_base])
+	PhysicsSettings.reset("steer_force")
+	var tier_dist := {}
+	for tier in [["gentle", 0.2, 1.6], ["hard", 1.0, 1.6], ["hard_hi", 1.0, 3.0]]:
+		PhysicsSettings.set_value("high_scale", tier[2])
+		top.reset_top(start, 100.0)
+		top.set_run_active(true)
+		tin.call("set_test_steer_vector", Vector2(0, -tier[1]))
+		var s0: Vector2 = top.global_position
+		for i in 90:
+			await physics_frame
+		tier_dist[tier[0]] = s0.distance_to(top.global_position)
+	PhysicsSettings.reset("high_scale")
+	tin.call("set_test_steer_vector", Vector2(0, -1))
+	check(tier_dist["hard"] > tier_dist["gentle"] * 4.0, "hard tilt moves far more than gentle (%.0f vs %.0f)" % [tier_dist["hard"], tier_dist["gentle"]])
+	check(tier_dist["gentle"] > 0.5, "gentle tilt still moves a little (%.1f)" % tier_dist["gentle"])
+	check(tier_dist["hard_hi"] > tier_dist["hard"] * 1.1, "higher high_scale moves further live (%.0f vs %.0f)" % [tier_dist["hard_hi"], tier_dist["hard"]])
 	PhysicsSettings.set_value("max_speed", 180.0)
 	top.set_run_active(true)
 	top.linear_velocity = Vector2(600, 0)

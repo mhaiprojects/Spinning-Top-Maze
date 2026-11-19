@@ -11,6 +11,32 @@ const MOUSE_MAX_DIST := 220.0
 const TILT_DEADZONE := 0.08
 const TILT_INVERT_X := true
 const DRAG_RADIUS := 120.0
+const SMOOTH := 0.18
+
+
+static func smooth_alpha(delta: float, response_rate: float, base_smooth: float = SMOOTH) -> float:
+	var b: float = clampf(base_smooth, 0.001, 0.99)
+	var r: float = maxf(response_rate, 0.01)
+	return 1.0 - pow(1.0 - b, clampf(delta, 0.0, 0.1) * 60.0 * r)
+
+
+static func map_device_tilt(angles_deg: Vector2, full_scale_deg: float, sensitivity: float) -> Vector2:
+	var scale: float = maxf(full_scale_deg, 1.0)
+	var v: Vector2 = angles_deg / scale * sensitivity
+	v = map_tilt_axes(v)
+	var L: float = v.length()
+	if L > 1.0:
+		v /= L
+	return v
+
+
+static func map_accel_tilt(accel: Vector2, sensitivity: float) -> Vector2:
+	var v: Vector2 = accel / 9.8 * sensitivity
+	v = map_tilt_axes(v)
+	var L: float = v.length()
+	if L > 1.0:
+		v /= L
+	return v
 
 
 static func map_tilt_axes(v: Vector2) -> Vector2:

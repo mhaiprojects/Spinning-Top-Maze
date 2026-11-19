@@ -3,7 +3,6 @@ extends Node
 
 const PlayBg := preload("res://scripts/play_background.gd")
 
-const SMOOTH := 0.18
 const TILT_TIMEOUT_SEC := 1.5
 
 var _settings_path := "user://settings.cfg"
@@ -37,12 +36,14 @@ signal fallback_message(text: String)
 signal background_changed(id: int)
 
 var _background: int = PlayBg.Id.TABLETOP
+var _smooth_target := Vector2.ZERO
 
 
 func _ready() -> void:
 	_load_calibration()
 	_load_mode()
 	_load_background()
+	PhysicsSettings.load_from_path(_settings_path)
 	if OS.has_feature("web"):
 		_install_web_tilt()
 	if _selected_mode == InputModes.Mode.TILT:
@@ -53,6 +54,7 @@ func set_settings_path(path: String) -> void:
 	_settings_path = path
 	_load_mode()
 	_load_background()
+	PhysicsSettings.load_from_path(_settings_path)
 
 
 func settings_path() -> String:
@@ -149,6 +151,12 @@ func _process(delta: float) -> void:
 		_maybe_tilt_fallback(delta)
 	_update_cursor_world()
 	_refresh_effective_from_selection()
+	_smooth_target = _compute_steer_target()
+	var alpha: float = InputModes.smooth_alpha(
+		delta,
+		PhysicsSettings.get_value("tilt_response")
+	)
+	_smooth = _smooth.lerp(_smooth_target, alpha)
 	if _drag_active and _effective_mode == InputModes.Mode.DRAG and not _steer_blocked and not _touch_drag_armed:
 		var vp: Viewport = get_viewport()
 		if vp:
@@ -203,6 +211,12 @@ func set_steer_blocked(blocked: bool) -> void:
 		_notify_drag_overlay(false)
 
 
+func release_menu_drag() -> void:
+	_drag_active = false
+	_touch_drag_armed = false
+	_notify_drag_overlay(false)
+
+
 func set_test_steer_vector(v: Vector2) -> void:
 	_test_steer = v
 
@@ -221,9 +235,19 @@ func get_steer_vector() -> Vector2:
 		Input.is_key_pressed(KEY_DOWN) or Input.is_key_pressed(KEY_S)
 	)
 	if kb.length_squared() > 0.0001:
-		_smooth = _smooth.lerp(kb, SMOOTH)
-		return _smooth
+		return kb
+	return _smooth
 
+
+func _compute_steer_target() -> Vector2:
+	var kb: Vector2 = InputModes.steer_keyboard(
+		Input.is_key_pressed(KEY_LEFT) or Input.is_key_pressed(KEY_A),
+		Input.is_key_pressed(KEY_RIGHT) or Input.is_key_pressed(KEY_D),
+		Input.is_key_pressed(KEY_UP) or Input.is_key_pressed(KEY_W),
+		Input.is_key_pressed(KEY_DOWN) or Input.is_key_pressed(KEY_S)
+	)
+	if kb.length_squared() > 0.0001:
+		return kb
 	var base := Vector2.ZERO
 	match _effective_mode:
 		InputModes.Mode.MOUSE:
@@ -239,9 +263,7 @@ func get_steer_vector() -> Vector2:
 		InputModes.Mode.TILT:
 			var oriented: Vector2 = _raw_tilt
 			base = InputModes.steer_tilt(_raw_tilt, _cal_offset, oriented)
-
-	_smooth = _smooth.lerp(base, SMOOTH)
-	return _smooth
+	return base
 
 
 func get_tilt_vector() -> Vector2:
@@ -371,9 +393,13 @@ func _poll_native_accel() -> void:
 	var a: Vector3 = Input.get_accelerometer()
 	if a == Vector3.ZERO:
 		return
-	var v := Vector2(a.x, a.y)
-	if v.length() > 0.001:
-		_raw_tilt = InputModes.rotate_for_screen(v.normalized(), float(DisplayServer.screen_get_orientation()))
+	var sens: float = PhysicsSettings.get_value("tilt_sensitivity")
+	var mapped: Vector2 = InputModes.map_accel_tilt(Vector2(a.x, a.y), sens)
+	if mapped.length() > 0.001:
+		_raw_tilt = InputModes.rotate_for_screen(
+			mapped,
+			float(DisplayServer.screen_get_orientation())
+		)
 		_tilt_live = true
 
 
@@ -441,13 +467,25 @@ func _poll_web_tilt() -> void:
 	if d.get("denied", false):
 		_tilt_denied = true
 		return
-	var v := Vector2.ZERO
+	var sens: float = PhysicsSettings.get_value("tilt_sensitivity")
+	var full: float = PhysicsSettings.get_value("tilt_full_scale_deg")
+	var mapped := Vector2.ZERO
 	if absf(float(d.get("gamma", 0.0))) > 0.01 or absf(float(d.get("beta", 0.0))) > 0.01:
-		v = Vector2(float(d.get("gamma", 0.0)) / 90.0, float(d.get("beta", 0.0)) / 90.0)
+		mapped = InputModes.map_device_tilt(
+			Vector2(float(d.get("gamma", 0.0)), float(d.get("beta", 0.0))),
+			full,
+			sens
+		)
 	elif absf(float(d.get("ax", 0.0))) > 0.01:
-		v = Vector2(float(d.get("ax", 0.0)) / 9.8, float(d.get("ay", 0.0)) / 9.8)
-	if v.length() > 0.01:
-		_raw_tilt = InputModes.rotate_for_screen(v.normalized(), float(DisplayServer.screen_get_orientation()))
+		mapped = InputModes.map_accel_tilt(
+			Vector2(float(d.get("ax", 0.0)), float(d.get("ay", 0.0))),
+			sens
+		)
+	if mapped.length() > 0.01:
+		_raw_tilt = InputModes.rotate_for_screen(
+			mapped,
+			float(DisplayServer.screen_get_orientation())
+		)
 		_tilt_live = true
 
 

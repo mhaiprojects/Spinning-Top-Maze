@@ -113,6 +113,8 @@ func _update_steer_block() -> void:
 	var blocked: bool = phase != Phase.RUN or _overlay_busy or phase == Phase.GOAL_FALL
 	if _ui.has_method("overlay_visible") and _ui.overlay_visible():
 		blocked = true
+	if _ui.has_method("physics_settings_menu_open") and _ui.physics_settings_menu_open():
+		blocked = true
 	tin.call("set_steer_blocked", blocked)
 
 
@@ -314,6 +316,11 @@ func _on_top_hit_wall() -> void:
 	apply_screen_shake(1.35)
 
 
+func _gui_editing_text() -> bool:
+	var fo: Control = get_viewport().gui_get_focus_owner()
+	return fo is LineEdit
+
+
 func toggle_pause() -> void:
 	if phase == Phase.RUN:
 		phase = Phase.PAUSED
@@ -339,6 +346,10 @@ func overlay_primary_action() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if _ui.has_method("handle_overlay_input") and _ui.handle_overlay_input(event):
+		return
+	if _ui.has_method("physics_settings_menu_open") and _ui.physics_settings_menu_open():
+		return
+	if _gui_editing_text():
 		return
 
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_SPACE:

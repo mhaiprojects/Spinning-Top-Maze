@@ -21,6 +21,8 @@ var _btn_mode: Button
 var _btn_board: Button
 var _btn_pause: Button
 var _btn_retry: Button
+var _btn_settings: Button
+var _physics_menu: PhysicsMenu
 var _overlay: Control
 var _overlay_card: PanelContainer
 var _overlay_lbl: Label
@@ -47,6 +49,11 @@ func _ready() -> void:
 		_refresh_board_button()
 	call_deferred("_refresh_mode_button")
 	call_deferred("_refresh_board_button")
+	_physics_menu = PhysicsMenu.new()
+	var tin_path: Node = get_node_or_null("/root/TiltInput")
+	if tin_path and tin_path.has_method("settings_path"):
+		_physics_menu.set_settings_path(str(tin_path.call("settings_path")))
+	add_child(_physics_menu)
 
 
 func set_layout_rects(vp: Vector2, play: Rect2, top_h: float, _bot_h: float) -> void:
@@ -175,6 +182,12 @@ func _build_hud() -> void:
 	row.add_child(_btn_pause)
 	_btn_retry = _btn("Retry", _on_retry)
 	row.add_child(_btn_retry)
+	var row2 := HBoxContainer.new()
+	row2.add_theme_constant_override("separation", 8)
+	v.add_child(row2)
+	_btn_settings = _btn("Settings", _on_open_settings)
+	_btn_settings.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row2.add_child(_btn_settings)
 
 
 func _build_overlay() -> void:
@@ -280,8 +293,25 @@ func _process(delta: float) -> void:
 			break
 
 
+func physics_settings_menu_open() -> bool:
+	return _physics_menu != null and _physics_menu.is_open()
+
+
+func physics_menu_node() -> PhysicsMenu:
+	return _physics_menu
+
+
+func settings_button() -> Button:
+	return _btn_settings
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if handle_overlay_input(event):
+		return
+	if physics_settings_menu_open():
+		return
+	var fo: Control = get_viewport().gui_get_focus_owner()
+	if fo is LineEdit:
 		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_M or event.keycode == KEY_TAB:
@@ -432,3 +462,8 @@ func _on_retry() -> void:
 	var main = get_parent()
 	if main.has_method("force_retry_wave"):
 		main.call("force_retry_wave")
+
+
+func _on_open_settings() -> void:
+	if _physics_menu:
+		_physics_menu.open()

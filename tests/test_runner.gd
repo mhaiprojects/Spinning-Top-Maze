@@ -10,6 +10,9 @@ const Difficulty := preload("res://scripts/difficulty.gd")
 const InputModes := preload("res://scripts/input_modes.gd")
 const PlayBg := preload("res://scripts/play_background.gd")
 const UserSettings := preload("res://scripts/user_settings.gd")
+const PhysicsSettings := preload("res://scripts/physics_settings.gd")
+const TopPhysics := preload("res://scripts/top_physics.gd")
+const PhysicsMenu := preload("res://scripts/physics_menu.gd")
 
 const SETTINGS_TEST := "user://test_stm_settings.cfg"
 
@@ -88,6 +91,15 @@ func _run() -> void:
 	await test_drag_after_background_switch()
 	print("== Board key and button ==")
 	await test_board_key_and_button()
+	print("== Physics tunables ==")
+	test_physics_defaults()
+	test_smooth_alpha_doubled()
+	test_tilt_magnitude_preserved()
+	test_tier_scales()
+	test_lean_and_precession()
+	test_physics_save_load()
+	await test_physics_live_tuning()
+	await test_physics_settings_menu()
 	print("\nRESULT: %d passed, %d failed" % [passed, failed])
 
 
@@ -182,6 +194,9 @@ func test_all_scripts_load() -> void:
 		"res://scripts/maze_world.gd",
 		"res://scripts/spinning_top.gd",
 		"res://scripts/tilt_input.gd",
+		"res://scripts/physics_settings.gd",
+		"res://scripts/top_physics.gd",
+		"res://scripts/physics_menu.gd",
 	]
 	for p in paths:
 		var res: Resource = load(p)
@@ -1012,3 +1027,288 @@ func test_wave_overlay_flow() -> void:
 	check(int(main.get("wave")) == 3, "retry keeps wave 3 (new seed)")
 	inst.queue_free()
 	await process_frame
+
+
+func test_physics_defaults() -> void:
+	PhysicsSettings.reset_all()
+	check(
+		is_equal_approx(PhysicsSettings.get_value("steer_force"), TopScript.STEER_FORCE),
+		"steer_force default matches STEER_FORCE"
+	)
+	check(
+		is_equal_approx(PhysicsSettings.get_value("max_speed"), TopScript.MAX_LINEAR_SPEED),
+		"max_speed default matches MAX_LINEAR_SPEED"
+	)
+	check(
+		is_equal_approx(PhysicsSettings.get_value("wall_hit_slowdown"), TopScript.HIT_VEL_SCALE),
+		"wall_hit_slowdown default matches HIT_VEL_SCALE"
+	)
+	check(
+		is_equal_approx(PhysicsSettings.get_value("tilt_response"), 2.0),
+		"tilt_response default is 2.0"
+	)
+	for d in PhysicsSettings.DEFS:
+		var dv: float = float(d.default)
+		check(dv >= float(d.min) and dv <= float(d.max), "default %s within range" % d.key)
+
+
+func test_smooth_alpha_doubled() -> void:
+	var dt: float = 1.0 / 60.0
+	var a2: float = InputModes.smooth_alpha(dt, 2.0)
+	var expect: float = 1.0 - pow(1.0 - InputModes.SMOOTH, 2.0)
+	check(is_equal_approx(a2, expect), "smooth_alpha rate 2 at 60fps")
+	check(a2 > InputModes.SMOOTH, "doubled response alpha > legacy SMOOTH")
+	var slow := 0.0
+	var fast := 0.0
+	for i in 12:
+		slow = lerpf(slow, 1.0, InputModes.smooth_alpha(dt, 1.0))
+		fast = lerpf(fast, 1.0, InputModes.smooth_alpha(dt, 2.0))
+	check(fast > slow + 0.02, "rate 2 smoothing closer to target (%.3f vs %.3f)" % [fast, slow])
+
+
+func test_tilt_magnitude_preserved() -> void:
+	var gentle: Vector2 = InputModes.map_device_tilt(Vector2(10.0, 0.0), 35.0, 1.0)
+	var hard: Vector2 = InputModes.map_device_tilt(Vector2(40.0, 0.0), 35.0, 1.0)
+	check(gentle.length() > 0.05, "gentle tilt nonzero")
+	check(hard.length() > gentle.length() + 0.05, "hard tilt magnitude > gentle (%.3f vs %.3f)" % [hard.length(), gentle.length()])
+
+
+func test_tier_scales() -> void:
+	PhysicsSettings.reset_all()
+	var low_s: float = PhysicsSettings.get_value("low_scale")
+	var high_s: float = PhysicsSettings.get_value("high_scale")
+	var g: float = TopPhysics.tier_scale(0.2)
+	var h: float = TopPhysics.tier_scale(0.9)
+	check(absf(g - 0.2 * low_s) < 0.06, "gentle tier ~ m*low_scale")
+	check(absf(h - 0.9 * high_s) < 0.15, "hard tier ~ m*high_scale")
+	check(h > g * 2.5, "hard/gentle tier ratio large")
+	var prev: float = -0.01
+	var jump_eps: float = 0.2
+	for i in 201:
+		var m: float = float(i) / 200.0
+		var out: float = TopPhysics.tier_scale(m)
+		check(out >= prev - 0.0001, "tier_scale monotonic at m=%.2f" % m)
+		if i > 0:
+			check(out - prev < jump_eps, "tier_scale continuous step %d" % i)
+		prev = out
+
+
+func test_lean_and_precession() -> void:
+	PhysicsSettings.reset_all()
+	var shaped: Vector2 = TopPhysics.shape_input(Vector2(1.0, 0.0))
+	var lean_max: float = deg_to_rad(PhysicsSettings.get_value("lean_max_deg"))
+	var hi_scale: float = maxf(PhysicsSettings.get_value("high_scale"), 0.01)
+	var target: Vector2 = shaped * (lean_max / hi_scale)
+	var lean := Vector2.ZERO
+	for i in 180:
+		lean = TopPhysics.spring_lean(
+			lean,
+			target,
+			PhysicsSettings.get_value("lean_stiffness"),
+			1.0 / 60.0
+		)
+	check(lean.length() <= lean_max + 0.02, "lean bounded by lean_max")
+	check(lean.length() > lean_max * 0.65, "lean reaches most of target magnitude")
+	if lean.length() > 0.001 and target.length() > 0.001:
+		check(lean.normalized().dot(target.normalized()) > 0.9, "lean converges toward input direction")
+	var l0 := Vector2(0.15, 0.08)
+	var with_p := l0
+	var no_p := l0
+	for j in 120:
+		with_p = TopPhysics.apply_precession(with_p, 0.35, 4.0, 1.0 / 60.0, 1.0)
+		no_p = TopPhysics.apply_precession(no_p, 0.4, 0.0, 1.0 / 60.0, 1.0)
+	check(with_p.angle_to(l0) > 0.01, "precession rotates lean")
+	var rate: float = 2.5
+	var ll: float = l0.length()
+	var omega_low: float = rate * ll / maxf(0.2, 0.15)
+	var omega_high: float = rate * ll / maxf(1.0, 0.15)
+	check(omega_low > omega_high, "lower spin_norm implies faster precession omega")
+
+
+func test_physics_save_load() -> void:
+	PhysicsSettings.reset_all()
+	var path := SETTINGS_TEST
+	InputModes.save_mode(path, InputModes.Mode.DRAG)
+	UserSettings.save_background(path, PlayBg.Id.CHOPPING)
+	PhysicsSettings.set_value("tier_threshold", 0.62)
+	PhysicsSettings.set_value("steer_force", 610.0)
+	PhysicsSettings.save_to_path(path)
+	PhysicsSettings.reset_all()
+	PhysicsSettings.load_from_path(path)
+	check(
+		is_equal_approx(PhysicsSettings.get_value("tier_threshold"), 0.62),
+		"physics load tier_threshold"
+	)
+	check(
+		is_equal_approx(PhysicsSettings.get_value("steer_force"), 610.0),
+		"physics load steer_force"
+	)
+	var cfg := UserSettings.load_config(path)
+	check(
+		int(cfg.get_value("input", "mode", -1)) == InputModes.Mode.DRAG,
+		"save physics preserves input section"
+	)
+	check(
+		int(cfg.get_value("visual", "background", -1)) == PlayBg.Id.CHOPPING,
+		"save physics preserves visual section"
+	)
+	PhysicsSettings.reset("steer_force")
+	check(
+		is_equal_approx(PhysicsSettings.get_value("steer_force"), TopScript.STEER_FORCE),
+		"reset(key) restores default"
+	)
+	PhysicsSettings.reset_all()
+	check(
+		is_equal_approx(PhysicsSettings.get_value("tier_threshold"), 0.5),
+		"reset_all restores defaults"
+	)
+
+
+func test_physics_live_tuning() -> void:
+	PhysicsSettings.reset_all()
+	var top: SpinningTop = TopScript.new()
+	root.add_child(top)
+	await process_frame
+	top.set_run_active(true)
+	top.set_initial_power(100.0)
+	top.global_position = Vector2(360, 640)
+	var tin: Node = root.get_node_or_null("TiltInput")
+	if tin and tin.has_method("set_steer_blocked"):
+		tin.call("set_steer_blocked", false)
+	if tin and tin.has_method("set_test_steer_vector"):
+		tin.call("set_test_steer_vector", Vector2(0, -1))
+	var start: Vector2 = top.global_position
+	for i in 200:
+		await physics_frame
+	var dist_base: float = start.distance_to(top.global_position)
+	PhysicsSettings.set_value("steer_force", 1300.0)
+	top.reset_top(start, 100.0)
+	top.set_run_active(true)
+	var start2: Vector2 = top.global_position
+	for i in 200:
+		await physics_frame
+	var dist_high: float = start2.distance_to(top.global_position)
+	check(dist_high > dist_base * 1.15, "higher steer_force moves further (%.0f vs %.0f)" % [dist_high, dist_base])
+	PhysicsSettings.set_value("max_speed", 180.0)
+	top.set_run_active(true)
+	top.linear_velocity = Vector2(600, 0)
+	for cap_i in 8:
+		await physics_frame
+	check(top.linear_velocity.length() <= 182.0, "max_speed cap respected")
+	PhysicsSettings.set_value("fall_threshold", 50.0)
+	top.reset_top(Vector2(300, 400), 40.0)
+	top.set_run_active(true)
+	for j in 12:
+		await physics_frame
+	check(top.is_fallen() or top.fall_kind() != TopScript.FallKind.NONE, "fall_threshold triggers fall at 40% power")
+	if tin and tin.has_method("clear_test_steer_vector"):
+		tin.call("clear_test_steer_vector")
+	top.queue_free()
+	await process_frame
+	PhysicsSettings.reset_all()
+
+
+func test_physics_settings_menu() -> void:
+	PhysicsSettings.reset_all()
+	var scene: PackedScene = load("res://scenes/main.tscn")
+	var inst := scene.instantiate()
+	root.add_child(inst)
+	for i in 30:
+		await process_frame
+	var ui: Node = inst.get_node_or_null("UI")
+	var tin: Node = root.get_node_or_null("TiltInput")
+	var menu: PhysicsMenu = ui.call("physics_menu_node") as PhysicsMenu
+	var settings_btn: Button = ui.call("settings_button") as Button
+	check(menu != null and settings_btn != null, "physics menu and Settings button present")
+	settings_btn.pressed.emit()
+	for i in 8:
+		await process_frame
+	check(menu.is_open(), "gear opens settings menu")
+	check(paused, "settings menu pauses tree")
+	var steer_def: Dictionary = {}
+	for d in PhysicsSettings.DEFS:
+		if d.key == "steer_force":
+			steer_def = d
+			break
+	var slider: HSlider = menu.slider_for_key("steer_force")
+	var spin: SpinBox = menu.spinbox_for_key("steer_force")
+	check(slider != null and spin != null, "menu row steer_force controls")
+	slider.value = 700.0
+	for i in 3:
+		await process_frame
+	check(is_equal_approx(spin.value, 700.0), "slider syncs to spinbox")
+	spin.value = 820.0
+	for i in 3:
+		await process_frame
+	check(is_equal_approx(slider.value, 820.0), "spinbox syncs to slider")
+	spin.value = 50.0
+	for i in 3:
+		await process_frame
+	check(
+		spin.value >= float(steer_def.get("min", 100.0)),
+		"spinbox clamps low to min (steer row was %.1f)" % spin.value
+	)
+	var bg_before: int = int(tin.call("selected_background"))
+	var line: LineEdit = spin.get_line_edit()
+	line.grab_focus()
+	for k in 4:
+		await process_frame
+	var key_b := InputEventKey.new()
+	key_b.pressed = true
+	key_b.echo = false
+	key_b.keycode = KEY_B
+	ui.call("_unhandled_input", key_b)
+	var key_b_up := InputEventKey.new()
+	key_b_up.pressed = false
+	key_b_up.keycode = KEY_B
+	ui.call("_unhandled_input", key_b_up)
+	for i in 6:
+		await process_frame
+	check(int(tin.call("selected_background")) == bg_before, "B ignored while spinbox focused in menu")
+	PhysicsSettings.reset("steer_force")
+	menu.call("_refresh_row", "steer_force")
+	check(is_equal_approx(spin.value, TopScript.STEER_FORCE), "per-row reset in menu")
+	menu.call("_on_reset_all")
+	await process_frame
+	check(is_equal_approx(PhysicsSettings.get_value("steer_force"), TopScript.STEER_FORCE), "reset all in menu")
+	menu.close()
+	for i in 10:
+		await process_frame
+	check(not menu.is_open(), "menu closes")
+	check(not paused, "tree unpaused after menu close")
+	var main: Node = inst
+	var top: SpinningTop = _find_main_child(main, SpinningTop) as SpinningTop
+	main.call("_begin_run", 95.0)
+	tin.call("set_mode", InputModes.Mode.DRAG)
+	tin.call("set_steer_blocked", false)
+	for i in 20:
+		await physics_frame
+	var y0: float = top.global_position.y
+	var down := InputEventMouseButton.new()
+	down.button_index = MOUSE_BUTTON_LEFT
+	down.pressed = true
+	down.position = Vector2(360, 900)
+	Input.parse_input_event(down)
+	tin.call("handle_input", down)
+	var move := InputEventMouseMotion.new()
+	move.position = Vector2(360, 720)
+	move.button_mask = MOUSE_BUTTON_MASK_LEFT
+	for j in 60:
+		Input.parse_input_event(move)
+		await physics_frame
+	check(top.global_position.y < y0 - 10.0, "drag works after closing settings menu")
+	var key_b2 := InputEventKey.new()
+	key_b2.pressed = true
+	key_b2.echo = false
+	key_b2.keycode = KEY_B
+	ui.call("_unhandled_input", key_b2)
+	var key_b2_up := InputEventKey.new()
+	key_b2_up.pressed = false
+	key_b2_up.keycode = KEY_B
+	ui.call("_unhandled_input", key_b2_up)
+	for i in 8:
+		await process_frame
+	check(int(tin.call("selected_background")) != bg_before, "B cycles board after menu closed")
+	inst.queue_free()
+	await process_frame
+	PhysicsSettings.reset_all()

@@ -77,7 +77,33 @@ The maze floor and wall colours follow a selectable **board** theme (procedural 
 | Launch release | Tap / click / **Space** (works in every mode; launch taps ignore steering) |
 | Pause / Retry | HUD buttons |
 
-HUD: **Input mode**, **Board theme**, **Calibrate** (Tilt), **Pause**, **Retry**, power bar, wave label, status line.
+HUD: **Input mode**, **Board theme**, **Settings**, **Calibrate** (Tilt), **Pause**, **Retry**, power bar, wave label, status line.
+
+### Physics settings (in-game)
+
+Open **Settings** on the HUD (pauses play, blocks steering). Adjust sliders or type in the numeric fields; **Reset** per row or **Reset all**; **Close** or **Escape** saves to `user://settings.cfg` under `[physics]` (other sections are preserved). On Web, `[physics]` is also mirrored to `localStorage` key `stm_physics`.
+
+| Key | Label (menu) | Default | Range | Role |
+|-----|----------------|---------|-------|------|
+| `tilt_response` | Tilt response | 2.0 | 0.5–4 | Frame-rate-independent input smoothing (2× legacy at 60 fps) |
+| `tilt_sensitivity` | Tilt sensitivity | 1.0 | 0.25–3 | Tilt input gain |
+| `tilt_full_scale_deg` | Tilt full scale (deg) | 35 | 10–90 | Device angle mapped to full deflection |
+| `lean_max_deg` | Max lean (deg) | 28 | 5–60 | Max top lean (steer + visuals) |
+| `lean_stiffness` | Lean stiffness | 10 | 1–30 | How fast lean follows input |
+| `precession_rate` | Precession rate | 2.5 | 0–10 | Gyroscopic wobble (faster when spin is low) |
+| `low_scale` | Gentle tier scale | 0.35 | 0.05–1.5 | Movement scale for light input |
+| `high_scale` | Hard tier scale | 1.6 | 0.5–4 | Movement scale for strong input |
+| `tier_threshold` | Tier threshold | 0.5 | 0.1–0.9 | Input magnitude where tiers blend |
+| `tier_blend` | Tier blend width | 0.18 | 0.02–0.4 | Smoothstep width at tier cross |
+| `steer_force` | Steer force | 480 | 100–1500 | Central force at full lean |
+| `max_speed` | Max speed | 520 | 150–1500 | Linear speed cap |
+| `linear_damp` | Linear damp | 2.2 | 0–8 | Rigid-body linear damping |
+| `spin_decay_mult` | Spin decay mult | 1.0 | 0–3 | Multiplier on wave spin decay |
+| `wall_hit_slowdown` | Wall hit slowdown | 0.6 | 0.1–1 | Velocity kept after a wall hit |
+| `wall_hit_loss_mult` | Wall hit loss mult | 1.0 | 0–3 | Multiplier on wall power loss |
+| `fall_threshold` | Fall threshold (%) | 0 | 0–40 | Fall when power ≤ threshold (0 = off) |
+
+Code: `scripts/physics_settings.gd` (tunables + save/load), `scripts/top_physics.gd` (tiers / lean math), `scripts/physics_menu.gd` (UI).
 
 ## Run locally
 
@@ -115,6 +141,9 @@ godot --headless --path . --export-release "Web" build/web/index.html
 | `scripts/maze_world.gd` | Wall bodies + maze drawing |
 | `scripts/input_modes.gd` | Pure logic: mode cycle, defaults, steer vectors, save/load |
 | `scripts/tilt_input.gd` | Autoload: four modes + keyboard override / web tilt |
+| `scripts/physics_settings.gd` | Central physics tunables, `[physics]` persistence |
+| `scripts/top_physics.gd` | Tier shaping, lean spring, precession helpers |
+| `scripts/physics_menu.gd` | In-game Settings panel |
 | `scripts/drag_stick_overlay.gd` | On-screen virtual stick while dragging |
 | `scripts/difficulty.gd` | Per-wave maze and gameplay tuning |
 | `scripts/visual_theme.gd` | HUD/overlay StyleBox helpers |

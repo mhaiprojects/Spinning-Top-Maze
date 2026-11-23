@@ -3,6 +3,7 @@ extends Node2D
 ## Builds collision walls and draws the maze from MazeGen data.
 
 const WALL_GROUP := "maze_wall"
+const ViewportLayout := preload("res://scripts/viewport_layout.gd")
 const HAZARD_GROUP := "hazard_zone"
 const PlayBg := preload("res://scripts/play_background.gd")
 
@@ -21,6 +22,14 @@ func set_play_background(id: int) -> void:
 	queue_redraw()
 
 
+func screen_play_rect() -> Rect2:
+	return Rect2(global_position + _play_rect.position, _play_rect.size)
+
+
+func play_area_rect() -> Rect2:
+	return _play_rect
+
+
 func build(data: Dictionary, play_rect: Rect2) -> void:
 	_clear_maze_now()
 	maze_data = data
@@ -29,7 +38,8 @@ func build(data: Dictionary, play_rect: Rect2) -> void:
 	var cols: int = data.cols
 	var rows: int = data.rows
 	_cell_size = Vector2(play_rect.size.x / float(cols), play_rect.size.y / float(rows))
-	_wall_thick = clampf(play_rect.size.x / 720.0 * 16.0, 12.0, 22.0)
+	var layout_w: float = play_rect.size.x / ViewportLayout.DESIGN_SIZE.x
+	_wall_thick = clampf(layout_w * 16.0, 10.0, 24.0)
 	for seg in data.walls:
 		_add_wall_segment(seg)
 	for h in data.get("hazards", []):

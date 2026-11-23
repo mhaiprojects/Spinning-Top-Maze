@@ -3,6 +3,7 @@ extends CanvasLayer
 ## Settings overlay: game controls + physics tunables (pauses tree while open).
 
 const VT := preload("res://scripts/visual_theme.gd")
+const ViewportLayout := preload("res://scripts/viewport_layout.gd")
 
 var _open := false
 var _prev_paused := false
@@ -18,6 +19,7 @@ var _btn_board: Button
 var _btn_calibrate: Button
 var _btn_retry: Button
 var _btn_resume: Button
+var _frame_margin: MarginContainer
 
 
 func _ready() -> void:
@@ -31,19 +33,44 @@ func set_ui_host(host: Node) -> void:
 	_ui_host = host
 
 
+func apply_viewport_layout(vp: Vector2) -> void:
+	if _frame_margin == null or _root_panel == null:
+		return
+	var s: float = ViewportLayout.ui_scale(vp)
+	var m: float = maxf(8.0, 12.0 * s)
+	var top_m: float = maxf(8.0, minf(48.0 * s, vp.y * 0.1))
+	_frame_margin.add_theme_constant_override("margin_left", int(m))
+	_frame_margin.add_theme_constant_override("margin_right", int(m))
+	_frame_margin.add_theme_constant_override("margin_top", int(top_m))
+	_frame_margin.add_theme_constant_override("margin_bottom", int(m))
+	var max_h: float = maxf(160.0, vp.y - top_m - m * 2.0)
+	var max_w: float = maxf(220.0, vp.x - m * 2.0)
+	_root_panel.custom_minimum_size = Vector2(
+		minf(maxf(260.0, 300.0 * s), max_w),
+		minf(maxf(220.0, 400.0 * s), max_h)
+	)
+
+
+func settings_panel_rect() -> Rect2:
+	if _root_panel == null:
+		return Rect2()
+	return _root_panel.get_global_rect()
+
+
 func _build_ui() -> void:
 	var dim := ColorRect.new()
 	dim.color = Color(0, 0, 0, 0.55)
 	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
 	dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(dim)
-	var center := MarginContainer.new()
-	center.set_anchors_preset(Control.PRESET_FULL_RECT)
-	center.add_theme_constant_override("margin_left", 12)
-	center.add_theme_constant_override("margin_right", 12)
-	center.add_theme_constant_override("margin_top", 48)
-	center.add_theme_constant_override("margin_bottom", 48)
-	add_child(center)
+	_frame_margin = MarginContainer.new()
+	_frame_margin.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_frame_margin.add_theme_constant_override("margin_left", 12)
+	_frame_margin.add_theme_constant_override("margin_right", 12)
+	_frame_margin.add_theme_constant_override("margin_top", 48)
+	_frame_margin.add_theme_constant_override("margin_bottom", 48)
+	add_child(_frame_margin)
+	var center := _frame_margin
 	_root_panel = PanelContainer.new()
 	_root_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_root_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -342,6 +369,8 @@ func open() -> void:
 	var tin: Node = get_node_or_null("/root/TiltInput")
 	if tin and tin.has_method("set_steer_blocked"):
 		tin.call("set_steer_blocked", true)
+	var vp: Rect2 = get_viewport().get_visible_rect()
+	apply_viewport_layout(vp.size)
 	refresh_game_rows()
 	for d in PhysicsSettings.DEFS:
 		_refresh_row(d.key)

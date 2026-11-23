@@ -119,6 +119,8 @@ func _run() -> void:
 	print("== Settings gear HUD ==")
 	await test_settings_gear_hud()
 	await test_hud_play_layout()
+	test_web_export_shell_preset()
+	await test_viewport_layouts()
 	print("\nRESULT: %d passed, %d failed" % [passed, failed])
 
 
@@ -346,6 +348,7 @@ func test_all_scripts_load() -> void:
 		"res://scripts/physics_settings.gd",
 		"res://scripts/top_physics.gd",
 		"res://scripts/physics_menu.gd",
+		"res://scripts/viewport_layout.gd",
 	]
 	for p in paths:
 		var res: Resource = load(p)
@@ -1786,6 +1789,90 @@ func test_physics_settings_menu() -> void:
 	inst.queue_free()
 	await process_frame
 	PhysicsSettings.reset_all()
+
+
+func _rect_inside_viewport(inner: Rect2, vp: Rect2, pad: float = 3.0) -> bool:
+	return (
+		inner.position.x >= vp.position.x - pad
+		and inner.position.y >= vp.position.y - pad
+		and inner.end.x <= vp.end.x + pad
+		and inner.end.y <= vp.end.y + pad
+	)
+
+
+func test_web_export_shell_preset() -> void:
+	var preset: String = FileAccess.get_file_as_string("res://export_presets.cfg")
+	check(preset.contains("res://web/shell.html"), "Web export preset points at custom shell")
+	check(preset.contains("html/canvas_resize_policy=2"), "Web preset canvas_resize_policy adaptive (2)")
+	check(FileAccess.file_exists("res://web/shell.html"), "web/shell.html exists in project")
+	var shell: String = FileAccess.get_file_as_string("res://web/shell.html")
+	check(shell.contains("100dvh"), "shell CSS 100dvh")
+	check(shell.contains("overflow: hidden"), "shell overflow hidden")
+	check(not shell.contains("viewport-fit=cover"), "shell without viewport-fit=cover")
+	check(not shell.contains("safe-area-inset"), "shell without safe-area body padding")
+	check(not shell.contains("canvas.style.width"), "shell does not set canvas inline width")
+	check(shell.contains("$GODOT_CONFIG"), "shell keeps $GODOT_CONFIG placeholder")
+
+
+func test_viewport_layouts() -> void:
+	var scene: PackedScene = load("res://scenes/main.tscn")
+	var sizes: Array[Vector2i] = [
+		Vector2i(720, 1280),
+		Vector2i(360, 780),
+		Vector2i(390, 844),
+		Vector2i(1280, 720),
+		Vector2i(1920, 1080),
+		Vector2i(1024, 768),
+	]
+	for sz in sizes:
+		DisplayServer.window_set_size(sz)
+		var inst := scene.instantiate()
+		root.add_child(inst)
+		for i in 24:
+			await process_frame
+		var main: Node = inst
+		var ui: Node = inst.get_node("UI")
+		if main.has_method("_on_viewport_changed"):
+			main.call("_on_viewport_changed")
+		for i in 10:
+			await process_frame
+		var vp: Rect2 = inst.get_viewport().get_visible_rect()
+		var play: Rect2 = main.call("play_rect_screen") as Rect2
+		var hud: Rect2 = ui.call("hud_screen_rect") as Rect2
+		var launch: Rect2 = main.call("launch_bar_screen_rect") as Rect2
+		var maze: MazeWorld = _find_main_child(main, MazeWorld) as MazeWorld
+		var maze_r: Rect2 = maze.screen_play_rect()
+		var maze_local: Rect2 = maze.play_area_rect()
+		check(_rect_inside_viewport(play, vp), "play rect inside viewport %dx%d" % [sz.x, sz.y])
+		check(hud.end.y <= play.position.y + 3.0, "HUD above play at %dx%d" % [sz.x, sz.y])
+		check(_rect_inside_viewport(launch, vp), "launch bar inside viewport %dx%d" % [sz.x, sz.y])
+		check(_rect_inside_viewport(maze_r, vp), "maze inside viewport %dx%d" % [sz.x, sz.y])
+		check(
+			play.position.distance_to(maze_local.position) < 2.0
+			and is_equal_approx(play.size.x, maze_local.size.x)
+			and is_equal_approx(play.size.y, maze_local.size.y),
+			"maze play area matches layout at %dx%d" % [sz.x, sz.y]
+		)
+		var menu: PhysicsMenu = ui.call("physics_menu_node") as PhysicsMenu
+		var gear_btn: Button = ui.call("gear_button") as Button
+		gear_btn.pressed.emit()
+		for i in 8:
+			await process_frame
+		check(_rect_inside_viewport(menu.settings_panel_rect(), vp), "settings panel inside %dx%d" % [sz.x, sz.y])
+		menu.close()
+		for i in 6:
+			await process_frame
+		main.call("_begin_run", 88.0)
+		for i in 8:
+			await physics_frame
+		main.call("_finish_goal")
+		for i in 60:
+			await physics_frame
+		var card: Rect2 = ui.call("overlay_card_rect") as Rect2
+		check(_rect_inside_viewport(card, vp), "overlay card inside viewport %dx%d" % [sz.x, sz.y])
+		inst.queue_free()
+		await process_frame
+	DisplayServer.window_set_size(Vector2i(720, 1280))
 
 
 func test_hud_play_layout() -> void:

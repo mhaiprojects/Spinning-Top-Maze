@@ -19,6 +19,10 @@ var _bar_rect := Rect2()
 var _marker_trail: Array[float] = []
 
 
+func bar_screen_rect() -> Rect2:
+	return _bar_rect
+
+
 func setup(bar_rect: Rect2, wave_num: int) -> void:
 	_bar_rect = bar_rect
 	wave = wave_num

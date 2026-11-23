@@ -107,6 +107,8 @@ Opens a scrollable panel (game + physics). **Resume** or **Escape** closes, save
 
 Code: `scripts/physics_settings.gd` (tunables + save/load), `scripts/top_physics.gd` (tiers / lean math), `scripts/physics_menu.gd` (UI).
 
+**Web viewport:** the `Web` export preset uses `res://web/shell.html` — `100dvh` fixed layout, no `viewport-fit=cover` (layout viewport stays in the safe area), `canvas_resize_policy` adaptive (Godot sizes the canvas), and light `visualViewport` hooks (`body` height + `scrollTo`) only.
+
 ## Run locally
 
 ```bash

@@ -4,6 +4,7 @@ extends CanvasLayer
 const GEAR_SZ := 56.0
 const FONT_SZ := 22
 const VT := preload("res://scripts/visual_theme.gd")
+const ViewportLayout := preload("res://scripts/viewport_layout.gd")
 const DifficultyStars := preload("res://scripts/difficulty_stars.gd")
 
 var _vp_size := Vector2(720, 1280)
@@ -53,6 +54,13 @@ func set_layout_rects(vp: Vector2, play: Rect2, top_h: float, _bot_h: float) -> 
 	_vp_size = vp
 	_play_rect = play
 	_hud_height = top_h
+	var ui_s: float = ViewportLayout.ui_scale(vp)
+	if _overlay_card:
+		var card_w: float = minf(320.0 * ui_s, maxf(200.0, vp.x - 24.0))
+		var card_h: float = minf(200.0, maxf(140.0, vp.y * 0.32))
+		_overlay_card.custom_minimum_size = Vector2(card_w, card_h)
+	if _physics_menu:
+		_physics_menu.apply_viewport_layout(vp)
 	if _hud_band:
 		var band_h: float = maxf(top_h, hud_band_height())
 		_hud_band.offset_bottom = band_h

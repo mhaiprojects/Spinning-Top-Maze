@@ -4,6 +4,7 @@ extends Node2D
 ## (no trigger area and no pull toward it).
 
 const LaunchIntroScene := preload("res://scripts/launch_intro.gd")
+const ViewportLayout := preload("res://scripts/viewport_layout.gd")
 
 enum Phase { INTRO, LAUNCH, RUN, GOAL_FALL, CLEARED, FELL, PAUSED }
 
@@ -122,17 +123,28 @@ func relayout_for_hud() -> void:
 	_apply_play_layout(true)
 
 
+func play_rect_screen() -> Rect2:
+	return _play_rect
+
+
+func launch_bar_screen_rect() -> Rect2:
+	if _launch and _launch.has_method("bar_screen_rect"):
+		return _launch.call("bar_screen_rect") as Rect2
+	return Rect2()
+
+
 func _apply_play_layout(_hud_only: bool) -> void:
 	var vp: Rect2 = get_viewport().get_visible_rect()
-	var sy: float = vp.size.y / 1280.0
-	var top_h: float = BASE_TOP_H * sy
+	var layout: Dictionary = ViewportLayout.scaled_heights(vp.size)
+	var top_h: float = float(layout.top)
 	if _ui and _ui.has_method("hud_band_height"):
 		top_h = maxf(top_h, _ui.hud_band_height())
-	var bot_h: float = BASE_BOTTOM_H * sy
+	var bot_h: float = float(layout.bottom)
+	var margin: float = float(layout.margin)
 	_play_rect = Rect2(
-		MARGIN,
+		margin,
 		top_h,
-		vp.size.x - MARGIN * 2.0,
+		maxf(40.0, vp.size.x - margin * 2.0),
 		maxf(80.0, vp.size.y - top_h - bot_h)
 	)
 	if _ui and _ui.has_method("set_layout_rects"):
@@ -168,18 +180,27 @@ func _generate_maze() -> void:
 	_position_launch_bar()
 
 
-func _position_launch_bar() -> void:
+func _launch_bar_rect(vp: Rect2) -> Rect2:
+	var bot_h: float = float(ViewportLayout.scaled_heights(vp.size).bottom)
+	var s: float = float(ViewportLayout.scaled_heights(vp.size).scale)
+	var inset: float = maxf(12.0, 16.0 * s)
+	var bar := Rect2(
+		_play_rect.position.x + inset,
+		maxf(_play_rect.end.y + 4.0, vp.size.y - bot_h + 8.0 * s),
+		maxf(40.0, _play_rect.size.x - inset * 2.0),
+		maxf(36.0, minf(bot_h - 16.0 * s, vp.size.y - (_play_rect.end.y + 8.0)))
+	)
+	if bar.end.y > vp.size.y:
+		bar.size.y = maxf(32.0, vp.size.y - bar.position.y - 2.0)
+	return bar
+
+
+func _position_launch_bar(setup := false) -> void:
 	if _play_rect.size.x < 1.0:
 		return
 	var vp: Rect2 = get_viewport().get_visible_rect()
-	var bot_h: float = BASE_BOTTOM_H * (vp.size.y / 1280.0)
-	var bar := Rect2(
-		_play_rect.position.x + 16,
-		vp.size.y - bot_h + 12,
-		_play_rect.size.x - 32,
-		maxf(48.0, bot_h - 24)
-	)
-	if phase == Phase.LAUNCH and _launch.active:
+	var bar: Rect2 = _launch_bar_rect(vp)
+	if phase == Phase.LAUNCH and (setup or _launch.active):
 		_launch.setup(bar, wave)
 
 
@@ -195,15 +216,7 @@ func _start_launch() -> void:
 ## Timing bar first; the hand release animation follows once it resolves.
 func _show_launch_bar() -> void:
 	phase = Phase.LAUNCH
-	var vp: Rect2 = get_viewport().get_visible_rect()
-	var bot_h: float = BASE_BOTTOM_H * (vp.size.y / 1280.0)
-	var bar := Rect2(
-		_play_rect.position.x + 16,
-		vp.size.y - bot_h + 12,
-		_play_rect.size.x - 32,
-		maxf(48.0, bot_h - 24)
-	)
-	_launch.setup(bar, wave)
+	_position_launch_bar(true)
 	_launch.visible = true
 	if _ui.has_method("on_phase_launch"):
 		_ui.on_phase_launch(wave)

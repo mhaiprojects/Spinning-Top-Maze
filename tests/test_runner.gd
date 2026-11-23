@@ -102,6 +102,7 @@ func _run() -> void:
 	await test_board_key_and_button()
 	print("== Physics tunables ==")
 	test_physics_defaults()
+	test_physics_settings_migration()
 	test_smooth_alpha_doubled()
 	test_tilt_magnitude_preserved()
 	test_tier_scales()
@@ -1320,12 +1321,93 @@ func test_physics_defaults() -> void:
 		"wall_hit_slowdown default matches HIT_VEL_SCALE"
 	)
 	check(
-		is_equal_approx(PhysicsSettings.get_value("tilt_response"), 2.0),
-		"tilt_response default is 2.0"
+		is_equal_approx(PhysicsSettings.get_value("tilt_response"), 3.0),
+		"tilt_response default is 3.0"
+	)
+	check(
+		is_equal_approx(PhysicsSettings.get_value("tilt_sensitivity"), 3.0),
+		"tilt_sensitivity default is 3.0"
+	)
+	check(
+		is_equal_approx(PhysicsSettings.get_value("lean_max_deg"), 45.0),
+		"lean_max_deg default is 45.0"
 	)
 	for d in PhysicsSettings.DEFS:
 		var dv: float = float(d.default)
 		check(dv >= float(d.min) and dv <= float(d.max), "default %s within range" % d.key)
+
+
+func test_physics_settings_migration() -> void:
+	var migrate_path := SETTINGS_TEST + ".physics_migrate"
+	if FileAccess.file_exists(migrate_path):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(migrate_path))
+	var cfg := ConfigFile.new()
+	cfg.set_value("physics", "tilt_response", 2.0)
+	cfg.set_value("physics", "tilt_sensitivity", 1.0)
+	cfg.set_value("physics", "lean_max_deg", 28.0)
+	cfg.set_value("physics", "steer_force", 610.0)
+	cfg.save(migrate_path)
+	PhysicsSettings.reset_all()
+	PhysicsSettings.load_from_path(migrate_path)
+	check(
+		is_equal_approx(PhysicsSettings.get_value("tilt_response"), 3.0),
+		"legacy file migrates tilt_response from old default"
+	)
+	check(
+		is_equal_approx(PhysicsSettings.get_value("tilt_sensitivity"), 3.0),
+		"legacy file migrates tilt_sensitivity from old default"
+	)
+	check(
+		is_equal_approx(PhysicsSettings.get_value("lean_max_deg"), 45.0),
+		"legacy file migrates lean_max_deg from old default"
+	)
+	check(
+		is_equal_approx(PhysicsSettings.get_value("steer_force"), 610.0),
+		"legacy file keeps custom steer_force"
+	)
+	var cfg2 := UserSettings.load_config(migrate_path)
+	check(
+		int(cfg2.get_value("physics", "physics_version", 0)) == PhysicsSettings.PHYSICS_VERSION,
+		"migration writes physics_version"
+	)
+	if FileAccess.file_exists(migrate_path):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(migrate_path))
+	cfg = ConfigFile.new()
+	cfg.set_value("physics", "tilt_response", 2.0)
+	cfg.set_value("physics", "tilt_sensitivity", 1.7)
+	cfg.set_value("physics", "lean_max_deg", 28.0)
+	cfg.save(migrate_path)
+	PhysicsSettings.reset_all()
+	PhysicsSettings.load_from_path(migrate_path)
+	check(
+		is_equal_approx(PhysicsSettings.get_value("tilt_sensitivity"), 1.7),
+		"legacy file keeps customised tilt_sensitivity"
+	)
+	check(
+		is_equal_approx(PhysicsSettings.get_value("tilt_response"), 3.0),
+		"legacy file still migrates other old-default keys"
+	)
+	if FileAccess.file_exists(migrate_path):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(migrate_path))
+	cfg = ConfigFile.new()
+	cfg.set_value("physics", "physics_version", PhysicsSettings.PHYSICS_VERSION)
+	cfg.set_value("physics", "tilt_response", 2.5)
+	cfg.set_value("physics", "tilt_sensitivity", 1.0)
+	cfg.set_value("physics", "lean_max_deg", 30.0)
+	cfg.save(migrate_path)
+	PhysicsSettings.reset_all()
+	PhysicsSettings.load_from_path(migrate_path)
+	check(
+		is_equal_approx(PhysicsSettings.get_value("tilt_sensitivity"), 1.0),
+		"version-2 file keeps saved tilt_sensitivity 1.0"
+	)
+	check(
+		is_equal_approx(PhysicsSettings.get_value("tilt_response"), 2.5),
+		"version-2 file keeps saved tilt_response"
+	)
+	if FileAccess.file_exists(migrate_path):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(migrate_path))
+	PhysicsSettings.reset_all()
 
 
 func test_smooth_alpha_doubled() -> void:

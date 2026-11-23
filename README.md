@@ -81,14 +81,14 @@ HUD: **Input mode**, **Board theme**, **Settings**, **Calibrate** (Tilt), **Paus
 
 ### Physics settings (in-game)
 
-Open **Settings** on the HUD (pauses play, blocks steering). Adjust sliders or type in the numeric fields; **Reset** per row or **Reset all**; **Close** or **Escape** saves to `user://settings.cfg` under `[physics]` (other sections are preserved). On Web, `[physics]` is also mirrored to `localStorage` key `stm_physics`.
+Open **Settings** on the HUD (pauses play, blocks steering). Adjust sliders or type in the numeric fields; **Reset** per row or **Reset all**; **Close** or **Escape** saves to `user://settings.cfg` under `[physics]` with `physics_version` (other sections are preserved). On Web, `[physics]` is also mirrored to `localStorage` key `stm_physics`. Older saves without a version auto-migrate only unchanged legacy defaults for tilt response, sensitivity, and max lean.
 
 | Key | Label (menu) | Default | Range | Role |
 |-----|----------------|---------|-------|------|
-| `tilt_response` | Tilt response | 2.0 | 0.5–4 | Frame-rate-independent input smoothing (2× legacy at 60 fps) |
-| `tilt_sensitivity` | Tilt sensitivity | 1.0 | 0.25–3 | Tilt input gain |
+| `tilt_response` | Tilt response | 3.0 | 0.5–4 | Frame-rate-independent input smoothing |
+| `tilt_sensitivity` | Tilt sensitivity | 3.0 | 0.25–3 | Tilt input gain |
 | `tilt_full_scale_deg` | Tilt full scale (deg) | 35 | 10–90 | Device angle mapped to full deflection |
-| `lean_max_deg` | Max lean (deg) | 28 | 5–60 | Max top lean (steer + visuals) |
+| `lean_max_deg` | Max lean (deg) | 45 | 5–60 | Max top lean (steer + visuals) |
 | `lean_stiffness` | Lean stiffness | 10 | 1–30 | How fast lean follows input |
 | `precession_rate` | Precession rate | 2.5 | 0–10 | Gyroscopic wobble (faster when spin is low) |
 | `low_scale` | Gentle tier scale | 0.35 | 0.05–1.5 | Movement scale for light input |

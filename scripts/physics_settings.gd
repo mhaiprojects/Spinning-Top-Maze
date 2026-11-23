@@ -6,6 +6,15 @@ const TopScript := preload("res://scripts/spinning_top.gd")
 
 const SECTION := "physics"
 const LS_KEY := "stm_physics"
+const PHYSICS_VERSION := 2
+const VERSION_KEY := "physics_version"
+const MIGRATE_EPS := 0.001
+
+const LEGACY_DEFAULTS: Dictionary = {
+	"tilt_response": 2.0,
+	"tilt_sensitivity": 1.0,
+	"lean_max_deg": 28.0,
+}
 
 static var _values: Dictionary = {}
 static var _revision: int = 0
@@ -14,7 +23,7 @@ static var DEFS: Array[Dictionary] = [
 	{
 		"key": "tilt_response",
 		"label": "Tilt response",
-		"default": 2.0,
+		"default": 3.0,
 		"min": 0.5,
 		"max": 4.0,
 		"step": 0.05,
@@ -22,7 +31,7 @@ static var DEFS: Array[Dictionary] = [
 	{
 		"key": "tilt_sensitivity",
 		"label": "Tilt sensitivity",
-		"default": 1.0,
+		"default": 3.0,
 		"min": 0.25,
 		"max": 3.0,
 		"step": 0.05,
@@ -38,7 +47,7 @@ static var DEFS: Array[Dictionary] = [
 	{
 		"key": "lean_max_deg",
 		"label": "Max lean (deg)",
-		"default": 28.0,
+		"default": 45.0,
 		"min": 5.0,
 		"max": 60.0,
 		"step": 1.0,
@@ -218,13 +227,18 @@ static func load_from_path(path: String = UserSettings.DEFAULT_PATH) -> void:
 		reset_all()
 	var cfg := UserSettings.load_config(path)
 	var has_section := cfg.has_section(SECTION)
+	var saved_ver := 0
 	if has_section:
 		for d in DEFS:
 			var k: String = d.key
 			if cfg.has_section_key(SECTION, k):
 				_values[k] = _clamp_key(k, float(cfg.get_value(SECTION, k, d.default)))
+		if cfg.has_section_key(SECTION, VERSION_KEY):
+			saved_ver = int(cfg.get_value(SECTION, VERSION_KEY, 0))
 	elif OS.has_feature("web"):
-		_load_local_storage()
+		saved_ver = _load_local_storage()
+	if _apply_version_migration(saved_ver):
+		save_to_path(path)
 	_bump_revision()
 
 
@@ -232,13 +246,34 @@ static func save_to_path(path: String = UserSettings.DEFAULT_PATH) -> bool:
 	var cfg := UserSettings.load_config(path)
 	for d in DEFS:
 		cfg.set_value(SECTION, d.key, get_value(d.key))
+	cfg.set_value(SECTION, VERSION_KEY, PHYSICS_VERSION)
 	if OS.has_feature("web"):
 		_mirror_local_storage()
 	return UserSettings.save_config(path, cfg)
 
 
+static func _legacy_value_matches(key: String, v: float) -> bool:
+	if not LEGACY_DEFAULTS.has(key):
+		return false
+	return absf(v - float(LEGACY_DEFAULTS[key])) <= MIGRATE_EPS
+
+
+static func _apply_version_migration(saved_ver: int) -> bool:
+	if saved_ver >= PHYSICS_VERSION:
+		return false
+	var changed := false
+	for key in LEGACY_DEFAULTS.keys():
+		var cur: float = get_value(key)
+		if _legacy_value_matches(key, cur):
+			var nv: float = float(_def_for(key).default)
+			if not is_equal_approx(cur, nv):
+				_values[key] = nv
+				changed = true
+	return changed
+
+
 static func _mirror_local_storage() -> void:
-	var payload := {}
+	var payload := {VERSION_KEY: PHYSICS_VERSION}
 	for d in DEFS:
 		payload[d.key] = get_value(d.key)
 	var json := JSON.stringify(payload)
@@ -248,17 +283,20 @@ static func _mirror_local_storage() -> void:
 	)
 
 
-static func _load_local_storage() -> void:
+static func _load_local_storage() -> int:
 	var s: String = JavaScriptBridge.eval(
 		"(function(){try{return localStorage.getItem('%s')||'';}catch(e){return '';}})();" % LS_KEY,
 		true
 	)
 	if s.is_empty():
-		return
+		return 0
 	var parsed: Variant = JSON.parse_string(s)
 	if typeof(parsed) != TYPE_DICTIONARY:
-		return
+		return 0
 	var dct: Dictionary = parsed
 	for d in DEFS:
 		if dct.has(d.key):
 			_values[d.key] = _clamp_key(d.key, float(dct[d.key]))
+	if dct.has(VERSION_KEY):
+		return int(dct[VERSION_KEY])
+	return 0

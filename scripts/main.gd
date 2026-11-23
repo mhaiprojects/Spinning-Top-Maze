@@ -7,7 +7,7 @@ const LaunchIntroScene := preload("res://scripts/launch_intro.gd")
 
 enum Phase { INTRO, LAUNCH, RUN, GOAL_FALL, CLEARED, FELL, PAUSED }
 
-const BASE_TOP_H := 228.0
+const BASE_TOP_H := 152.0
 const BASE_BOTTOM_H := 140.0
 const MARGIN := 10.0
 
@@ -115,9 +115,19 @@ func _on_viewport_changed() -> void:
 
 
 func _layout_all() -> void:
+	_apply_play_layout(false)
+
+
+func relayout_for_hud() -> void:
+	_apply_play_layout(true)
+
+
+func _apply_play_layout(_hud_only: bool) -> void:
 	var vp: Rect2 = get_viewport().get_visible_rect()
 	var sy: float = vp.size.y / 1280.0
 	var top_h: float = BASE_TOP_H * sy
+	if _ui and _ui.has_method("hud_band_height"):
+		top_h = maxf(top_h, _ui.hud_band_height())
 	var bot_h: float = BASE_BOTTOM_H * sy
 	_play_rect = Rect2(
 		MARGIN,
@@ -125,9 +135,17 @@ func _layout_all() -> void:
 		vp.size.x - MARGIN * 2.0,
 		maxf(80.0, vp.size.y - top_h - bot_h)
 	)
-	if _ui.has_method("set_layout_rects"):
+	if _ui and _ui.has_method("set_layout_rects"):
 		_ui.set_layout_rects(vp.size, _play_rect, top_h, bot_h)
-	_generate_maze_data_only()
+		if _ui.has_method("hud_band_height"):
+			var measured: float = _ui.hud_band_height()
+			if measured > top_h + 0.5:
+				top_h = measured
+				_play_rect.position.y = top_h
+				_play_rect.size.y = maxf(80.0, vp.size.y - top_h - bot_h)
+				_ui.set_layout_rects(vp.size, _play_rect, top_h, bot_h)
+	if not _hud_only:
+		_generate_maze_data_only()
 	if not _maze.maze_data.is_empty():
 		_maze.build(_maze.maze_data, _play_rect)
 	_position_launch_bar()

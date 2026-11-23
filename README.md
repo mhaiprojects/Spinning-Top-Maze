@@ -47,7 +47,7 @@ godot --headless --path . --script res://tests/difficulty_table.gd
 | **Drag** | Touch or hold left mouse and drag (virtual stick); vector clamped to length 1 | Phones, tablets, touch laptops |
 | **Tilt** | Device orientation / accelerometer (web: JS `deviceorientation` / `devicemotion`; native: `Input.get_accelerometer()`) | Phones / tablets |
 
-**Switch mode:** HUD button **Input: … [M]** or press **M** / **Tab** to cycle Mouse → Keyboard → Drag → Tilt. Choice is saved in `user://settings.cfg`.
+**Switch mode:** **Settings** (gear, top-right) → **Input** row, or press **M** / **Tab** to cycle Mouse → Keyboard → Drag → Tilt. Saved in `user://settings.cfg`.
 
 ### Play-area boards
 
@@ -60,7 +60,7 @@ The maze floor and wall colours follow a selectable **board** theme (procedural 
 | **Planks** | Long boards with seams and nail heads |
 | **Stone** | Grey carved stone with subtle cracks |
 
-**Switch board:** HUD button **Board: … [B]** or press **B** to cycle Tabletop → Chopping → Planks → Stone. Applies immediately (no wave restart). Stored as `[visual] background = <0–3>` in the same `user://settings.cfg` as input mode (merge save — changing one does not erase the other).
+**Switch board:** **Settings** → **Board** row, or press **B** to cycle Tabletop → Chopping → Planks → Stone. Applies immediately (no wave restart). Stored as `[visual] background` in the same settings file (merge save).
 
 **Defaults (no saved file):** **Tilt** on mobile / touch Web when sensors are likely available; **Drag** on touch without sensors; **Mouse** on desktop.
 
@@ -70,18 +70,18 @@ The maze floor and wall colours follow a selectable **board** theme (procedural 
 
 **iOS 13+ Web:** Choosing **Tilt** or the first launch tap calls `window.stmRequestTilt()` / `DeviceOrientationEvent.requestPermission()` (must be from a user gesture).
 
-**Calibrate** (Tilt selected): stores current tilt as zero offset.
+**Calibrate** (Tilt selected): **Settings** → **Calibrate tilt**.
 
 | Action | Input |
 |--------|--------|
 | Launch release | Tap / click / **Space** (works in every mode; launch taps ignore steering) |
-| Pause / Retry | HUD buttons |
+| Retry same wave | **Settings** → **Retry wave** (unpauses and restarts launch) |
 
-HUD: **Input mode**, **Board theme**, **Settings**, **Calibrate** (Tilt), **Pause**, **Retry**, power bar, wave label, status line.
+**HUD (top band):** wave + difficulty stars, input status line, hints, power bar, and a single **⚙** gear button (top-right). Wave-cleared / fell-over overlays (**Next Wave** / **Retry**) are unchanged.
 
-### Physics settings (in-game)
+### Settings menu (gear)
 
-Open **Settings** on the HUD (pauses play, blocks steering). Adjust sliders or type in the numeric fields; **Reset** per row or **Reset all**; **Close** or **Escape** saves to `user://settings.cfg` under `[physics]` with `physics_version` (other sections are preserved). On Web, `[physics]` is also mirrored to `localStorage` key `stm_physics`. Older saves without a version auto-migrate only unchanged legacy defaults for tilt response, sensitivity, and max lean.
+Opens a scrollable panel (game + physics). **Resume** or **Escape** closes, saves physics, and unpauses. While open, steering is blocked and the tree is paused. **Game:** input mode, board theme, calibrate tilt (when Tilt is selected), retry wave. **Physics:** tunable rows, **Reset all**. Shortcuts **M**, **B**, **Tab**, and **Space** still work when the menu is closed (physics SpinBoxes still capture keys when focused). Physics persist under `[physics]` + `physics_version` in `user://settings.cfg` (Web: `localStorage` `stm_physics`).
 
 | Key | Label (menu) | Default | Range | Role |
 |-----|----------------|---------|-------|------|

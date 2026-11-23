@@ -14,6 +14,8 @@ static func load_config(path: String) -> ConfigFile:
 
 
 static func save_config(path: String, cfg: ConfigFile) -> bool:
+	if OS.get_environment("STM_HEADLESS_TEST") == "1" and path == DEFAULT_PATH:
+		return false
 	return cfg.save(path) == OK
 
 

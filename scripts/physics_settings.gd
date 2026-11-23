@@ -243,6 +243,8 @@ static func load_from_path(path: String = UserSettings.DEFAULT_PATH) -> void:
 
 
 static func save_to_path(path: String = UserSettings.DEFAULT_PATH) -> bool:
+	if OS.get_environment("STM_HEADLESS_TEST") == "1" and path == UserSettings.DEFAULT_PATH:
+		return false
 	var cfg := UserSettings.load_config(path)
 	for d in DEFS:
 		cfg.set_value(SECTION, d.key, get_value(d.key))

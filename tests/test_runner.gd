@@ -21,8 +21,10 @@ var failed := 0
 
 
 func _initialize() -> void:
+	OS.set_environment("STM_HEADLESS_TEST", "1")
 	_clear_settings_test()
 	_bind_test_settings()
+	PhysicsSettings.load_from_path(SETTINGS_TEST)
 	await _run()
 	_clear_settings_test()
 	quit(1 if failed > 0 else 0)
@@ -37,6 +39,8 @@ func _bind_test_settings() -> void:
 	var tin: Node = root.get_node_or_null("TiltInput")
 	if tin and tin.has_method("set_settings_path"):
 		tin.call("set_settings_path", SETTINGS_TEST)
+	if tin and tin.has_method("set_mode"):
+		tin.call("set_mode", InputModes.Mode.MOUSE)
 
 
 func check(cond: bool, name: String) -> void:
@@ -110,6 +114,9 @@ func _run() -> void:
 	test_physics_save_load()
 	await test_physics_live_tuning()
 	await test_physics_settings_menu()
+	print("== Settings gear HUD ==")
+	await test_settings_gear_hud()
+	await test_hud_play_layout()
 	print("\nRESULT: %d passed, %d failed" % [passed, failed])
 
 
@@ -1058,8 +1065,7 @@ func test_steer_after_idle() -> void:
 
 
 func test_board_key_and_button() -> void:
-	# KEY_B and the HUD Board button must actually cycle the theme (not get
-	# swallowed by a full-rect Control / focus / unhandled-input order).
+	# KEY_B and the menu Board row must cycle the theme (HUD is gear-only).
 	_release_steer_inputs()
 	var scene: PackedScene = load("res://scenes/main.tscn")
 	var inst := scene.instantiate()
@@ -1068,13 +1074,14 @@ func test_board_key_and_button() -> void:
 		await process_frame
 	var ui: Node = inst.get_node_or_null("UI")
 	var tin: Node = root.get_node_or_null("TiltInput")
-	var btn: Button = ui.get("_btn_board") as Button if ui else null
-	check(btn != null and tin != null, "Board button and TiltInput present")
+	var menu: PhysicsMenu = ui.call("physics_menu_node") as PhysicsMenu
+	var gear: Button = ui.call("gear_button") as Button
+	check(gear != null and menu != null and tin != null, "gear and settings menu present")
+	check(ui.get("_btn_board") == null, "HUD has no board button")
 	tin.call("set_background", PlayBg.Id.TABLETOP)
 	for i in 6:
 		await process_frame
 	check(int(tin.call("selected_background")) == PlayBg.Id.TABLETOP, "start on tabletop")
-	check(str(btn.text).contains("Tabletop"), "HUD label starts Tabletop")
 
 	var vp: Viewport = inst.get_viewport()
 	var key_b := InputEventKey.new()
@@ -1092,38 +1099,39 @@ func test_board_key_and_button() -> void:
 		int(tin.call("selected_background")) == PlayBg.Id.CHOPPING,
 		"B key cycles to chopping (now %s)" % tin.call("background_name")
 	)
-	check(str(btn.text).contains("Chopping"), "HUD label updates after B key")
 
-	# No full-rect overlay should swallow HUD clicks, and the Board button's
-	# pressed handler must cycle the theme (same path as a player click).
-	var r: Rect2 = btn.get_global_rect()
-	check(r.size.x > 8.0 and r.size.y > 8.0, "Board button has a clickable rect %s" % r)
+	gear.pressed.emit()
+	for i in 8:
+		await process_frame
+	var board_btn: Button = menu.btn_board()
+	check(board_btn != null, "menu board button exists")
+	var r: Rect2 = board_btn.get_global_rect()
+	check(r.size.x > 8.0 and r.size.y > 8.0, "menu board button clickable %s" % r)
 	var overlay: Control = ui.get("_overlay") as Control
 	if overlay:
 		check(
 			(not overlay.visible) or overlay.mouse_filter == Control.MOUSE_FILTER_IGNORE,
-			"wave overlay does not swallow Board button clicks"
+			"wave overlay does not swallow gear clicks"
 		)
-	var intro: Node = inst.get_node_or_null("LaunchIntroLayer")
-	if intro and intro.get_child_count() > 0:
-		var intro_c: Node = intro.get_child(0)
-		if intro_c is Control:
-			check(
-				(not (intro_c as Control).visible) or (intro_c as Control).mouse_filter == Control.MOUSE_FILTER_IGNORE,
-				"intro layer does not swallow Board button clicks"
-			)
 	var before_click: int = int(tin.call("selected_background"))
-	btn.pressed.emit()
-	for i in 8:
+	board_btn.pressed.emit()
+	await process_frame
+	_refresh_menu_labels(menu)
+	for i in 6:
 		await process_frame
 	var after_click: int = int(tin.call("selected_background"))
 	check(
 		after_click == PlayBg.next_id(before_click),
-		"Board button click cycles theme %s -> %s" % [before_click, after_click]
+		"menu board click cycles theme %s -> %s" % [before_click, after_click]
 	)
-	check(str(btn.text).contains(str(tin.call("background_name"))), "HUD label updates after Board click")
+	menu.close()
 	inst.queue_free()
 	await process_frame
+
+
+func _refresh_menu_labels(menu: PhysicsMenu) -> void:
+	if menu and menu.has_method("refresh_game_rows"):
+		menu.call("refresh_game_rows")
 
 
 func test_drag_after_background_switch() -> void:
@@ -1137,7 +1145,7 @@ func test_drag_after_background_switch() -> void:
 		await process_frame
 	var main: Node = inst
 	var ui: Node = inst.get_node_or_null("UI")
-	check(ui != null and ui.get("_btn_board") != null, "HUD Board button is present")
+	check(ui != null and ui.get("_btn_gear") != null, "HUD gear button is present")
 	await _skip_intro(main)
 	main.call("_begin_run", 95.0)
 	for i in 20:
@@ -1151,9 +1159,6 @@ func test_drag_after_background_switch() -> void:
 	tin.call("set_steer_blocked", false)
 	tin.call("set_mode", InputModes.Mode.DRAG)
 	_release_steer_inputs()
-	var btn: Button = ui.get("_btn_board") as Button
-	if btn:
-		check(btn.focus_mode == Control.FOCUS_NONE, "Board button does not take keyboard focus")
 	for bg_i in PlayBg.ORDER.size():
 		if bg_i > 0:
 			if tin.has_method("cycle_background"):
@@ -1180,7 +1185,7 @@ func test_drag_after_background_switch() -> void:
 			"drag after board=%s moves top up %.1f px (velocity loophole not accepted)"
 			% [bg_name, dy]
 		)
-		# Keyboard after the Board button has been used.
+		# Keyboard after board theme change.
 		top.reset_top(maze.run_spawn_position(), 95.0)
 		top.set_run_active(true)
 		main.set("phase", MainScript.Phase.RUN)
@@ -1592,9 +1597,10 @@ func test_physics_settings_menu() -> void:
 	var ui: Node = inst.get_node_or_null("UI")
 	var tin: Node = root.get_node_or_null("TiltInput")
 	var menu: PhysicsMenu = ui.call("physics_menu_node") as PhysicsMenu
-	var settings_btn: Button = ui.call("settings_button") as Button
-	check(menu != null and settings_btn != null, "physics menu and Settings button present")
-	settings_btn.pressed.emit()
+	var gear: Button = ui.call("gear_button") as Button
+	check(menu != null and gear != null, "settings menu and gear present")
+	check(gear.custom_minimum_size.x >= 56.0, "gear touch target width")
+	gear.pressed.emit()
 	for i in 8:
 		await process_frame
 	check(menu.is_open(), "gear opens settings menu")
@@ -1686,3 +1692,102 @@ func test_physics_settings_menu() -> void:
 	inst.queue_free()
 	await process_frame
 	PhysicsSettings.reset_all()
+
+
+func test_hud_play_layout() -> void:
+	var scene: PackedScene = load("res://scenes/main.tscn")
+	for sz in [Vector2i(720, 1280), Vector2i(1280, 720)]:
+		DisplayServer.window_set_size(sz)
+		var inst := scene.instantiate()
+		root.add_child(inst)
+		for i in 20:
+			await process_frame
+		var main: Node = inst
+		var ui: Node = inst.get_node("UI")
+		if main.has_method("_on_viewport_changed"):
+			main.call("_on_viewport_changed")
+		for i in 8:
+			await process_frame
+		var hud: Rect2 = ui.call("hud_screen_rect") as Rect2
+		var play: Rect2 = main.get("_play_rect") as Rect2
+		check(
+			hud.end.y <= play.position.y + 1.0,
+			"HUD ends above play rect at %dx%d (hud %.0f play %.0f)"
+			% [sz.x, sz.y, hud.end.y, play.position.y]
+		)
+		check(ui.call("hud_has_only_gear_control"), "HUD gear is only button at %dx%d" % [sz.x, sz.y])
+		inst.queue_free()
+		await process_frame
+	DisplayServer.window_set_size(Vector2i(720, 1280))
+
+
+func test_settings_gear_hud() -> void:
+	var scene: PackedScene = load("res://scenes/main.tscn")
+	var inst := scene.instantiate()
+	root.add_child(inst)
+	for i in 25:
+		await process_frame
+	var ui: Node = inst.get_node_or_null("UI")
+	var menu: PhysicsMenu = ui.call("physics_menu_node") as PhysicsMenu
+	var tin: Node = root.get_node_or_null("TiltInput")
+	var main: Node = inst
+	check(ui.call("hud_has_only_gear_control"), "HUD exposes gear-only controls")
+	check(ui.get("_btn_gear") != null, "gear on HUD")
+	check(ui.get("_btn_board") == null, "no HUD board button")
+	check(ui.get("_btn_mode") == null, "no HUD mode button")
+	var gear: Button = ui.call("gear_button") as Button
+	gear.pressed.emit()
+	for i in 8:
+		await process_frame
+	check(menu.is_open(), "gear opens settings")
+	check(paused, "settings pauses game")
+	check(tin.call("steer_blocked"), "steering blocked while menu open")
+	var mode_btn: Button = menu.btn_mode()
+	var board_btn: Button = menu.btn_board()
+	var cal_btn: Button = menu.btn_calibrate()
+	var retry_btn: Button = menu.btn_retry()
+	check(mode_btn != null and board_btn != null and retry_btn != null, "game rows in menu")
+	var mode0: int = int(tin.call("selected_mode"))
+	mode_btn.pressed.emit()
+	for i in 6:
+		await process_frame
+	menu.refresh_game_rows()
+	check(int(tin.call("selected_mode")) != mode0, "menu mode button cycles input")
+	board_btn.pressed.emit()
+	for i in 6:
+		await process_frame
+	menu.refresh_game_rows()
+	check(str(board_btn.text).contains(str(tin.call("background_name"))), "menu board shows current theme")
+	tin.call("set_mode", InputModes.Mode.TILT)
+	menu.refresh_game_rows()
+	check(cal_btn.visible, "calibrate visible in tilt mode")
+	cal_btn.pressed.emit()
+	await process_frame
+	await _skip_intro(main)
+	main.call("_begin_run", 92.0)
+	for i in 12:
+		await physics_frame
+	main.set("phase", MainScript.Phase.RUN)
+	main.set("_overlay_busy", false)
+	var top: SpinningTop = _find_main_child(main, SpinningTop) as SpinningTop
+	var y0: float = top.global_position.y
+	tin.call("set_mode", InputModes.Mode.DRAG)
+	await _tin_drag(main, tin, Vector2(360, 900), Vector2(360, 680), 20)
+	check(absf(y0 - top.global_position.y) < 8.0, "no drag steer while settings open")
+	menu.close()
+	for i in 8:
+		await process_frame
+	check(not menu.is_open() and not paused, "resume closes menu and unpauses")
+	check(not tin.call("steer_blocked"), "steering unblocked after close")
+	gear.pressed.emit()
+	for i in 6:
+		await process_frame
+	menu.btn_retry().pressed.emit()
+	for i in 25:
+		await process_frame
+	check(not menu.is_open(), "retry closes menu")
+	check(not paused, "retry unpauses")
+	top = _find_main_child(main, SpinningTop) as SpinningTop
+	check(top != null, "retry leaves top present")
+	inst.queue_free()
+	await process_frame

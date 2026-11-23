@@ -1,7 +1,7 @@
 extends CanvasLayer
 ## HUD top band (does not cover the maze).
 
-const BTN_H := 64.0
+const GEAR_SZ := 56.0
 const FONT_SZ := 22
 const VT := preload("res://scripts/visual_theme.gd")
 const DifficultyStars := preload("res://scripts/difficulty_stars.gd")
@@ -9,19 +9,14 @@ const DifficultyStars := preload("res://scripts/difficulty_stars.gd")
 var _vp_size := Vector2(720, 1280)
 var _play_rect := Rect2()
 var _hud_band: PanelContainer
-var _hud_height := 228.0
+var _hud_height := 152.0
 var _power_bar: ProgressBar
 var _lbl_power: Label
 var _lbl_wave: Label
 var _diff_stars: DifficultyStars
 var _lbl_tilt: Label
 var _lbl_msg: Label
-var _btn_cal: Button
-var _btn_mode: Button
-var _btn_board: Button
-var _btn_pause: Button
-var _btn_retry: Button
-var _btn_settings: Button
+var _btn_gear: Button
 var _physics_menu: PhysicsMenu
 var _overlay: Control
 var _overlay_card: PanelContainer
@@ -45,11 +40,9 @@ func _ready() -> void:
 			tin.fallback_message.connect(_on_fallback_message)
 		if tin.has_signal("background_changed"):
 			tin.background_changed.connect(_on_background_changed)
-		_refresh_mode_button()
-		_refresh_board_button()
-	call_deferred("_refresh_mode_button")
-	call_deferred("_refresh_board_button")
+	call_deferred("_refresh_settings_menu")
 	_physics_menu = PhysicsMenu.new()
+	_physics_menu.set_ui_host(self)
 	var tin_path: Node = get_node_or_null("/root/TiltInput")
 	if tin_path and tin_path.has_method("settings_path"):
 		_physics_menu.set_settings_path(str(tin_path.call("settings_path")))
@@ -61,7 +54,16 @@ func set_layout_rects(vp: Vector2, play: Rect2, top_h: float, _bot_h: float) -> 
 	_play_rect = play
 	_hud_height = top_h
 	if _hud_band:
-		_hud_band.offset_bottom = top_h
+		var band_h: float = maxf(top_h, hud_band_height())
+		_hud_band.offset_bottom = band_h
+		_hud_height = band_h
+
+
+func hud_band_height() -> float:
+	if _hud_band == null:
+		return _hud_height
+	var m: Vector2 = _hud_band.get_combined_minimum_size()
+	return maxf(m.y, _hud_band.size.y)
 
 
 func overlay_visible() -> bool:
@@ -114,6 +116,7 @@ func _build_hud() -> void:
 	_hud_band.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	_hud_band.offset_bottom = _hud_height
 	_hud_band.mouse_filter = Control.MOUSE_FILTER_STOP
+	_hud_band.clip_contents = true
 	var hud_box := StyleBoxFlat.new()
 	hud_box.bg_color = Color(0.09, 0.1, 0.15, 0.94)
 	hud_box.border_color = Color(0.35, 0.38, 0.5, 0.35)
@@ -127,14 +130,29 @@ func _build_hud() -> void:
 	var margin := MarginContainer.new()
 	margin.add_theme_constant_override("margin_left", 12)
 	margin.add_theme_constant_override("margin_right", 12)
-	margin.add_theme_constant_override("margin_top", 6)
-	margin.add_theme_constant_override("margin_bottom", 6)
+	margin.add_theme_constant_override("margin_top", 4)
+	margin.add_theme_constant_override("margin_bottom", 4)
 	_hud_band.add_child(margin)
 	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 6)
+	v.add_theme_constant_override("separation", 4)
 	margin.add_child(v)
+	var wave_row := HBoxContainer.new()
+	wave_row.add_theme_constant_override("separation", 8)
+	v.add_child(wave_row)
 	_lbl_wave = _label("Wave 1")
-	v.add_child(_lbl_wave)
+	_lbl_wave.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_lbl_wave.clip_text = true
+	wave_row.add_child(_lbl_wave)
+	_btn_gear = Button.new()
+	_btn_gear.name = "GearButton"
+	_btn_gear.text = "\u2699"
+	_btn_gear.tooltip_text = "Settings"
+	_btn_gear.custom_minimum_size = Vector2(GEAR_SZ, GEAR_SZ)
+	_btn_gear.add_theme_font_size_override("font_size", 26)
+	VT.apply_button_theme(_btn_gear)
+	_btn_gear.focus_mode = Control.FOCUS_NONE
+	_btn_gear.pressed.connect(_on_open_settings)
+	wave_row.add_child(_btn_gear)
 	_diff_stars = DifficultyStars.new()
 	v.add_child(_diff_stars)
 	_lbl_tilt = _label("Input: Mouse")
@@ -148,7 +166,8 @@ func _build_hud() -> void:
 	_power_bar = ProgressBar.new()
 	_power_bar.min_value = 0
 	_power_bar.max_value = 100
-	_power_bar.custom_minimum_size = Vector2(280, 34)
+	_power_bar.custom_minimum_size = Vector2(120, 30)
+	_power_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_power_bar.show_percentage = false
 	var fill := StyleBoxFlat.new()
 	fill.bg_color = Color(0.35, 0.9, 0.45)
@@ -167,27 +186,7 @@ func _build_hud() -> void:
 	prow.add_child(_power_bar)
 	_lbl_power = _label("100%")
 	prow.add_child(_lbl_power)
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 8)
-	v.add_child(row)
-	_btn_mode = _btn("Input: Mouse [M]", _on_cycle_mode)
-	_btn_mode.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(_btn_mode)
-	_btn_board = _btn("Board: Tabletop [B]", _on_cycle_board)
-	_btn_board.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(_btn_board)
-	_btn_cal = _btn("Calibrate", _on_calibrate)
-	row.add_child(_btn_cal)
-	_btn_pause = _btn("Pause", _on_pause)
-	row.add_child(_btn_pause)
-	_btn_retry = _btn("Retry", _on_retry)
-	row.add_child(_btn_retry)
-	var row2 := HBoxContainer.new()
-	row2.add_theme_constant_override("separation", 8)
-	v.add_child(row2)
-	_btn_settings = _btn("Settings", _on_open_settings)
-	_btn_settings.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row2.add_child(_btn_settings)
+	_hud_band.resized.connect(_on_hud_band_resized)
 
 
 func _build_overlay() -> void:
@@ -264,18 +263,6 @@ func _label(text: String) -> Label:
 	return l
 
 
-func _btn(text: String, cb: Callable) -> Button:
-	var b := Button.new()
-	b.text = text
-	b.custom_minimum_size = Vector2(100, BTN_H)
-	b.add_theme_font_size_override("font_size", FONT_SZ)
-	VT.apply_button_theme(b)
-	# Don't steal arrow keys after a HUD click (Board / Input / Pause).
-	b.focus_mode = Control.FOCUS_NONE
-	b.pressed.connect(cb)
-	return b
-
-
 func _process(delta: float) -> void:
 	var tin: Node = get_node_or_null("/root/TiltInput")
 	if tin and tin.has_method("status_text"):
@@ -301,8 +288,35 @@ func physics_menu_node() -> PhysicsMenu:
 	return _physics_menu
 
 
+func gear_button() -> Button:
+	return _btn_gear
+
+
 func settings_button() -> Button:
-	return _btn_settings
+	return _btn_gear
+
+
+func hud_has_only_gear_control() -> bool:
+	if _btn_gear == null or _hud_band == null:
+		return false
+	var buttons: Array[Button] = []
+	_collect_hud_buttons(_hud_band, buttons)
+	if buttons.size() != 1:
+		return false
+	return buttons[0] == _btn_gear
+
+
+func _collect_hud_buttons(node: Node, out: Array[Button]) -> void:
+	if node is Button:
+		out.append(node as Button)
+	for c in node.get_children():
+		_collect_hud_buttons(c, out)
+
+
+func _on_hud_band_resized() -> void:
+	var main: Node = get_parent()
+	if main and main.has_method("relayout_for_hud"):
+		main.call_deferred("relayout_for_hud")
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -387,80 +401,42 @@ func _activate_overlay_action() -> void:
 		main.advance_wave()
 
 
-func _on_cycle_mode() -> void:
-	_cycle_mode()
-
-
-func _on_cycle_board() -> void:
-	_cycle_board()
-
-
 func _cycle_board() -> void:
 	var tin: Node = get_node_or_null("/root/TiltInput")
 	if tin and tin.has_method("cycle_background"):
 		tin.call("cycle_background")
-	_refresh_board_button()
+	_refresh_settings_menu()
 
 
 func _on_background_changed(_id: int) -> void:
-	_refresh_board_button()
-
-
-func _refresh_board_button() -> void:
-	var tin: Node = get_node_or_null("/root/TiltInput")
-	if tin == null or _btn_board == null:
-		return
-	var name: String = "Tabletop"
-	if tin.has_method("background_name"):
-		name = str(tin.call("background_name"))
-	_btn_board.text = "Board: %s [B]" % name
+	_refresh_settings_menu()
 
 
 func _cycle_mode() -> void:
 	var tin: Node = get_node_or_null("/root/TiltInput")
 	if tin and tin.has_method("cycle_mode"):
 		tin.call("cycle_mode")
-	_refresh_mode_button()
+	_refresh_settings_menu()
 
 
 func _on_mode_changed(_selected: int, _effective: int) -> void:
-	_refresh_mode_button()
+	_refresh_settings_menu()
 
 
 func _on_fallback_message(text: String) -> void:
 	_lbl_msg.text = text
 
 
-func _refresh_mode_button() -> void:
-	var tin: Node = get_node_or_null("/root/TiltInput")
-	if tin == null:
-		return
-	var name: String = "Mouse"
-	if tin.has_method("status_text"):
-		var st: String = tin.call("status_text")
-		if st.begins_with("Input: "):
-			name = st.split(" ")[1].trim_suffix("(on)").trim_suffix("(denied)")
-	var mode_word: String = name.split("(")[0].strip_edges()
-	_btn_mode.text = "Input: %s [M]" % mode_word
-	_btn_cal.visible = tin.has_method("selected_mode") and int(tin.call("selected_mode")) == InputModes.Mode.TILT
+func _refresh_settings_menu() -> void:
+	if _physics_menu and _physics_menu.is_open():
+		_physics_menu.refresh_game_rows()
 
 
-func _on_calibrate() -> void:
-	var t: Node = get_node_or_null("/root/TiltInput")
-	if t and t.has_method("calibrate_zero"):
-		t.call("calibrate_zero")
-
-
-func _on_pause() -> void:
+func menu_retry_wave() -> void:
+	if _physics_menu:
+		_physics_menu.close()
 	var main = get_parent()
-	if main.has_method("toggle_pause"):
-		main.toggle_pause()
-		_btn_pause.text = "Resume" if get_tree().paused else "Pause"
-
-
-func _on_retry() -> void:
-	var main = get_parent()
-	if main.has_method("force_retry_wave"):
+	if main and main.has_method("force_retry_wave"):
 		main.call("force_retry_wave")
 
 

@@ -204,6 +204,10 @@ func set_top_world_position(pos: Vector2) -> void:
 	_top_world = pos
 
 
+func steer_blocked() -> bool:
+	return _steer_blocked
+
+
 func set_steer_blocked(blocked: bool) -> void:
 	_steer_blocked = blocked
 	if blocked:

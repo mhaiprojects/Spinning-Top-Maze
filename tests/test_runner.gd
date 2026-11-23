@@ -850,8 +850,12 @@ func test_real_launch_steering() -> void:
 	var maze: MazeWorld = _find_main_child(main, MazeWorld) as MazeWorld
 	check(top.is_run_active(), "run active immediately after launch release")
 	var p_idle: float = top.spin_power
+	var spin_prev: float = top.spin_angle()
+	var spin_advanced: float = 0.0
 	for i in 180:
 		await physics_frame
+		spin_advanced += absf(wrapf(top.spin_angle() - spin_prev, -PI, PI))
+		spin_prev = top.spin_angle()
 	check(int(main.get("phase")) == MainScript.Phase.RUN, "still in run after idle")
 	var spawn_p: Vector2 = maze.run_spawn_position()
 	check(
@@ -865,7 +869,10 @@ func test_real_launch_steering() -> void:
 		% [top.rotation, top.spin_rate(), up_rel, Vector2.UP.angle_to(up_rel), top.visual_tilt()]
 	)
 	check(top.spin_rate() > 5.0, "after release top spins about its vertical axis")
-	check(absf(top.rotation) > 1.0, "after release physics spin has advanced")
+	check(
+		spin_advanced > 1.0,
+		"after release physics spin has advanced (%.2f rad unwrapped)" % spin_advanced
+	)
 	check(
 		absf(Vector2.UP.angle_to(up_rel)) < 0.6,
 		"after release art stays upright on its tip (%.3f rad)" % Vector2.UP.angle_to(up_rel)

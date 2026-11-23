@@ -1,6 +1,12 @@
 class_name SpinningTop
 extends RigidBody2D
 ## Top-down spinning top: tilt force, spin power, wall bounce loss.
+## The art is a side-profile top (handle up, pointy tip down at TIP_LOCAL).
+## Seen from above, the body's 2D angular_velocity is the spin about the top's
+## own vertical axis (kept for wall contacts). The node therefore rotates, so
+## _draw counter-rotates the profile art to keep it upright on its tip (it used
+## to turn end over end like a pinwheel) and shows that same spin as stripes
+## sliding round the cone. Lean/precession/fall tilts pivot around the tip.
 
 signal fell_over
 signal victory_complete
@@ -20,6 +26,7 @@ const RADIUS := 46.0
 const TRAIL_JUMP := 100.0
 const TRAIL_LEN := 18
 const FALL_ANIM := 1.0
+const TIP_LOCAL := Vector2(0, RADIUS * 0.8)
 
 var spin_power: float = 100.0
 var _falling := false
@@ -235,7 +242,9 @@ func _physics_process(delta: float) -> void:
 	var prec_rate: float = PhysicsSettings.get_value("precession_rate")
 	_lean = TopPhysics.apply_precession(_lean, spin_norm, prec_rate, delta, spin_sign)
 	if prec_rate > 0.0001:
-		_precess_phase += prec_rate * _lean.length() / spin_norm * delta * spin_sign
+		_precess_phase = wrapf(
+			_precess_phase + prec_rate * _lean.length() / spin_norm * delta * spin_sign, 0.0, TAU
+		)
 	var lean_len: float = _lean.length()
 	if lean_len > 0.0001:
 		if sleeping:
@@ -287,6 +296,40 @@ func _sync_physics_tunables() -> void:
 
 func lean_vector() -> Vector2:
 	return _lean
+
+
+## Spin about the top's own vertical (tip-to-handle) axis, rad/s.
+func spin_rate() -> float:
+	return angular_velocity
+
+
+## Spin phase shown by the cone stripes: the body's physics rotation.
+func spin_angle() -> float:
+	return rotation
+
+
+## Screen-plane tilt of the drawn top around its tip (radians, 0 = upright).
+func visual_tilt() -> float:
+	return float(_visual_pose().rot)
+
+
+func tip_local() -> Vector2:
+	return TIP_LOCAL
+
+
+## Local draw transform of the top's art (counter-rotated, tilted about the tip).
+func visual_transform() -> Transform2D:
+	var pose: Dictionary = _visual_pose()
+	var body_rot: float = pose.rot
+	var body_scale: Vector2 = pose.scale
+	var tip: Vector2 = (pose.off as Vector2) + TIP_LOCAL
+	var pivot_origin: Vector2 = tip - (TIP_LOCAL * body_scale).rotated(body_rot)
+	return Transform2D(-rotation, Vector2.ZERO) * Transform2D(body_rot, body_scale, 0.0, pivot_origin)
+
+
+## World-space direction from tip to handle of the drawn top (UP = upright).
+func visual_up_world() -> Vector2:
+	return global_transform.basis_xform(visual_transform().basis_xform(Vector2.UP)).normalized()
 
 
 func _advance_goal_fall(delta: float) -> void:
@@ -424,11 +467,7 @@ func reset_top(pos: Vector2, power: float) -> void:
 	queue_redraw()
 
 
-func _draw() -> void:
-	var shadow_scale := Vector2(1.15, 0.42)
-	draw_set_transform(Vector2(8, 12), 0.0, shadow_scale)
-	draw_circle(Vector2.ZERO, RADIUS * 0.82, Color(0, 0, 0, 0.28))
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+func _visual_pose() -> Dictionary:
 	var lean_max_rad: float = deg_to_rad(PhysicsSettings.get_value("lean_max_deg"))
 	var lean_ratio: float = 0.0
 	if lean_max_rad > 0.001:
@@ -436,12 +475,12 @@ func _draw() -> void:
 	var lean_dir: Vector2 = _lean.normalized() if _lean.length_squared() > 0.0001 else Vector2.ZERO
 	var lean_offset: Vector2 = lean_dir * lean_ratio * RADIUS * 0.35
 	var wobble: float = (1.0 - spin_power / 100.0) * 14.0 * sin(_wobble_phase)
-	var precess: float = _precess_phase * 0.22 + wobble * 0.04
+	# Bounded tilts around the tip: sideways lean, precession sway, low-spin wobble.
+	var body_rot: float = wobble * 0.025 + sin(_precess_phase) * lean_ratio * 0.12
 	var body_off := lean_offset
-	var body_rot := precess
 	var body_scale := Vector2.ONE
 	if lean_dir.length_squared() > 0.0001:
-		body_rot += lean_dir.angle() * lean_ratio * 0.12
+		body_rot += lean_dir.x * lean_ratio * 0.3
 		var along: float = absf(lean_dir.dot(Vector2.RIGHT))
 		body_scale = Vector2(
 			1.0 - lean_ratio * 0.14 * along,
@@ -452,9 +491,26 @@ func _draw() -> void:
 		body_rot += t * 0.9
 		body_off = Vector2.ZERO
 		body_scale = Vector2(1.0 + t * 0.25, 0.55 + t * 0.35)
-	draw_set_transform(body_off, body_rot, body_scale)
-	var spin_ang: float = _wobble_phase * (1.2 + spin_power * 0.02)
-	_draw_classic_body(spin_ang)
+	return {"rot": body_rot, "off": body_off, "scale": body_scale}
+
+
+func _draw() -> void:
+	var pose: Dictionary = _visual_pose()
+	var body_rot: float = pose.rot
+	var body_off: Vector2 = pose.off
+	var body_scale: Vector2 = pose.scale
+	var tip: Vector2 = body_off + TIP_LOCAL
+	# Undo the body's physics spin so the profile stays upright on screen.
+	var counter := Transform2D(-rotation, Vector2.ZERO)
+	# Contact shadow under the tip, stretched toward the handle's lean.
+	var spread: float = 0.35 + 0.4 * absf(sin(body_rot))
+	draw_set_transform_matrix(
+		counter * Transform2D(0.0, Vector2(1.0 + spread, 0.32), 0.0, tip + Vector2(6.0 * signf(body_rot), 4))
+	)
+	draw_circle(Vector2.ZERO, RADIUS * 0.5, Color(0, 0, 0, 0.28))
+	# Rotate/scale about the tip so it stays planted on the floor.
+	draw_set_transform_matrix(visual_transform())
+	_draw_classic_body(rotation)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
@@ -475,13 +531,19 @@ func _draw_classic_body(spin_ang: float) -> void:
 		var col: Color = wood_b if band_i % 2 == 0 else wood_c
 		var hw: float = lerpf(RADIUS * 0.78, RADIUS * 0.22, float(band_i) / 5.0)
 		draw_line(Vector2(-hw, by), Vector2(hw, by), col, 5.0)
-	var stripe_n := 12
+	# Spin about the vertical tip-to-handle axis: stripes on the cone slide
+	# sideways and wrap round the back (only the front half is drawn).
+	var stripe_n := 8
 	for i in stripe_n:
 		var a: float = spin_ang + TAU * float(i) / float(stripe_n)
+		var facing: float = cos(a)
+		if facing <= 0.0:
+			continue
+		var sx: float = sin(a)
 		draw_line(
-			Vector2.ZERO,
-			Vector2(cos(a), sin(a)) * RADIUS * 0.55,
-			Color(1, 0.92, 0.55, 0.35),
+			Vector2(sx * RADIUS * 0.76, -RADIUS * 0.2),
+			Vector2(sx * RADIUS * 0.24, RADIUS * 0.47),
+			Color(1, 0.92, 0.55, 0.15 + 0.35 * facing),
 			3.5
 		)
 	draw_rect(Rect2(-RADIUS * 0.1, -RADIUS * 0.78, RADIUS * 0.2, RADIUS * 0.45), Color(0.78, 0.5, 0.22))

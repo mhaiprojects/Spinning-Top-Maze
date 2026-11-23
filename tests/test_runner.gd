@@ -60,6 +60,8 @@ func _run() -> void:
 	await test_top_wall_hit()
 	await test_top_physics_wall_hit()
 	await test_top_speed_cap()
+	print("== Spin axis upright on tip ==")
+	await test_spin_axis_upright()
 	print("== Input modes ==")
 	test_input_mode_logic()
 	test_input_vectors()
@@ -274,6 +276,70 @@ func test_top_physics_wall_hit() -> void:
 		if top.spin_power < p0 - 0.5:
 			break
 	check(top.spin_power < p0, "physics wall contact lowers spin power")
+	top.queue_free()
+	wall.queue_free()
+	await process_frame
+
+
+func test_spin_axis_upright() -> void:
+	PhysicsSettings.reset_all()
+	var top: SpinningTop = TopScript.new()
+	var wall := StaticBody2D.new()
+	wall.add_to_group("maze_wall")
+	wall.collision_layer = 2
+	var shape := CollisionShape2D.new()
+	var rect := RectangleShape2D.new()
+	rect.size = Vector2(40, 400)
+	shape.shape = rect
+	wall.add_child(shape)
+	wall.position = Vector2(420, 400)
+	root.add_child(wall)
+	root.add_child(top)
+	await physics_frame
+	top.set_run_active(true)
+	top.set_initial_power(100.0)
+	top.global_position = Vector2(200, 400)
+	var tin: Node = root.get_node_or_null("TiltInput")
+	if tin:
+		if tin.has_method("set_steer_blocked"):
+			tin.call("set_steer_blocked", false)
+		if tin.has_method("set_test_steer_vector"):
+			tin.call("set_test_steer_vector", Vector2(1, -0.3))
+	var max_art := 0.0
+	var max_tilt := 0.0
+	var max_tip_drift := 0.0
+	var a_prev: float = top.spin_angle()
+	var advanced := 0.0
+	for i in 240:
+		await physics_frame
+		var up_w: Vector2 = top.visual_up_world()
+		max_art = maxf(max_art, absf(Vector2.UP.angle_to(up_w)))
+		max_tilt = maxf(max_tilt, absf(top.visual_tilt()))
+		# Where the drawn tip lands in world space vs the expected floor contact.
+		var vt: Transform2D = top.visual_transform()
+		var tip_w: Vector2 = top.global_transform * (vt * top.tip_local())
+		# Tip sits straight below the body centre in world space (up to the lean shift).
+		var expect_w: Vector2 = top.global_position + top.tip_local()
+		max_tip_drift = maxf(max_tip_drift, (tip_w - expect_w).length())
+		advanced += wrapf(top.spin_angle() - a_prev, -PI, PI)
+		a_prev = top.spin_angle()
+		if i % 60 == 59:
+			print(
+				"  SPIN t=%d rot=%.3f spin_rate=%.2f art_up=%s tilt=%.3f tip_w=%s pos=%s"
+				% [i + 1, top.rotation, top.spin_rate(), up_w, top.visual_tilt(), tip_w,
+					top.global_position]
+			)
+	if tin and tin.has_method("clear_test_steer_vector"):
+		tin.call("clear_test_steer_vector")
+	check(top.spin_rate() > 8.0, "spins about own vertical axis (%.1f rad/s)" % top.spin_rate())
+	check(advanced > 30.0, "physics spin advances and drives stripes (%.1f rad)" % advanced)
+	check(max_art < 0.6, "art stays upright on screen despite body spin (max %.3f rad)" % max_art)
+	check(max_tilt > 0.05, "lean tilts the top around its tip (%.3f rad)" % max_tilt)
+	check(top.tip_local().y > SpinningTop.RADIUS * 0.5, "pointy tip is the bottom pivot")
+	check(
+		max_tip_drift <= SpinningTop.RADIUS * 0.36,
+		"drawn tip stays planted below the top while it spins (max drift %.1f px)" % max_tip_drift
+	)
 	top.queue_free()
 	wall.queue_free()
 	await process_frame
@@ -591,6 +657,17 @@ func test_real_launch_steering() -> void:
 		"top parked at run spawn (d=%.1f)" % top.global_position.distance_to(spawn_p)
 	)
 	check(top.spin_power < p_idle - 0.4, "power decays during idle (%.1f -> %.1f)" % [p_idle, top.spin_power])
+	var up_rel: Vector2 = top.visual_up_world()
+	print(
+		"  SPIN after release: rot=%.3f spin_rate=%.2f art_up=%s art_angle=%.3f tilt=%.3f"
+		% [top.rotation, top.spin_rate(), up_rel, Vector2.UP.angle_to(up_rel), top.visual_tilt()]
+	)
+	check(top.spin_rate() > 5.0, "after release top spins about its vertical axis")
+	check(absf(top.rotation) > 1.0, "after release physics spin has advanced")
+	check(
+		absf(Vector2.UP.angle_to(up_rel)) < 0.6,
+		"after release art stays upright on its tip (%.3f rad)" % Vector2.UP.angle_to(up_rel)
+	)
 	var y0: float = top.global_position.y
 	check(not top.freeze, "top unfrozen after real launch path")
 	check(not top.is_fallen(), "top not fallen after real launch path")

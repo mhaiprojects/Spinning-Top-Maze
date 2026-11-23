@@ -1,5 +1,7 @@
 extends Node2D
-## Wave flow: maze, launch, run, goal / fall over.
+## Wave flow: maze, launch timing bar, hand release (INTRO), run, goal / fall over.
+## The goal is exactly one tile; it is won only when the top's centre is on it
+## (no trigger area and no pull toward it).
 
 const LaunchIntroScene := preload("res://scripts/launch_intro.gd")
 
@@ -15,7 +17,7 @@ var maze_seed: int = 0
 var _maze: MazeWorld
 var _top: SpinningTop
 var _launch: LaunchMinigame
-var _goal: Area2D
+var _release_power := 0.0
 var _play_rect := Rect2()
 var _overlay_busy := false
 var _shake := 0.0
@@ -51,18 +53,6 @@ func _ready() -> void:
 	_launch = LaunchMinigame.new()
 	add_child(_launch)
 	_launch.released.connect(_on_launch_released)
-	_goal = Area2D.new()
-	var goal_shape := CollisionShape2D.new()
-	var rect := RectangleShape2D.new()
-	rect.size = Vector2(40, 40)
-	goal_shape.shape = rect
-	_goal.add_child(goal_shape)
-	_goal.body_entered.connect(_on_goal_body)
-	_goal.collision_layer = 0
-	_goal.collision_mask = 1
-	_goal.monitoring = true
-	_goal.monitorable = false
-	add_child(_goal)
 	_new_wave_seed()
 	get_viewport().size_changed.connect(_on_viewport_changed)
 	call_deferred("_wire_play_background")
@@ -140,7 +130,6 @@ func _layout_all() -> void:
 	_generate_maze_data_only()
 	if not _maze.maze_data.is_empty():
 		_maze.build(_maze.maze_data, _play_rect)
-		_position_goal()
 	_position_launch_bar()
 
 
@@ -158,20 +147,7 @@ func _new_wave_seed() -> void:
 func _generate_maze() -> void:
 	var data: Dictionary = MazeGen.generate(wave, maze_seed)
 	_maze.build(data, _play_rect)
-	_position_goal()
 	_position_launch_bar()
-
-
-func _set_goal_active(on: bool) -> void:
-	_goal.set_deferred("monitoring", on)
-
-
-func _position_goal() -> void:
-	if _maze.maze_data.is_empty():
-		return
-	_goal.global_position = _maze.goal_area_rect().get_center()
-	var gs: RectangleShape2D = _goal.get_child(0).shape as RectangleShape2D
-	gs.size = _maze.goal_area_rect().size * 0.85
 
 
 func _position_launch_bar() -> void:
@@ -191,20 +167,39 @@ func _position_launch_bar() -> void:
 
 func _start_launch() -> void:
 	_overlay_busy = false
-	_set_goal_active(false)
 	_generate_maze()
 	_top.visible = false
 	_top.set_run_active(false)
 	_park_top_off_maze()
+	_show_launch_bar()
+
+
+## Timing bar first; the hand release animation follows once it resolves.
+func _show_launch_bar() -> void:
+	phase = Phase.LAUNCH
+	var vp: Rect2 = get_viewport().get_visible_rect()
+	var bot_h: float = BASE_BOTTOM_H * (vp.size.y / 1280.0)
+	var bar := Rect2(
+		_play_rect.position.x + 16,
+		vp.size.y - bot_h + 12,
+		_play_rect.size.x - 32,
+		maxf(48.0, bot_h - 24)
+	)
+	_launch.setup(bar, wave)
+	_launch.visible = true
+	if _ui.has_method("on_phase_launch"):
+		_ui.on_phase_launch(wave)
+
+
+func _on_launch_released(power: float) -> void:
+	if phase != Phase.LAUNCH:
+		return
+	_release_power = power
 	_launch.visible = false
 	phase = Phase.INTRO
 	if _ui.has_method("on_phase_intro"):
 		_ui.on_phase_intro(wave)
-	_intro.start_at(_maze.start_position())
-
-
-func _on_launch_released(power: float) -> void:
-	call_deferred("_begin_run", power)
+	_intro.start_at(_maze.run_spawn_position())
 
 
 func _park_top_off_maze() -> void:
@@ -216,7 +211,6 @@ func _park_top_off_maze() -> void:
 func _begin_run(power: float) -> void:
 	_overlay_busy = false
 	phase = Phase.RUN
-	_set_goal_active(true)
 	_top.visible = true
 	_launch.visible = false
 	_launch.cancel()
@@ -231,19 +225,7 @@ func _begin_run(power: float) -> void:
 func _on_intro_finished() -> void:
 	if phase != Phase.INTRO:
 		return
-	phase = Phase.LAUNCH
-	var vp: Rect2 = get_viewport().get_visible_rect()
-	var bot_h: float = BASE_BOTTOM_H * (vp.size.y / 1280.0)
-	var bar := Rect2(
-		_play_rect.position.x + 16,
-		vp.size.y - bot_h + 12,
-		_play_rect.size.x - 32,
-		maxf(48.0, bot_h - 24)
-	)
-	_launch.setup(bar, wave)
-	_launch.visible = true
-	if _ui.has_method("on_phase_launch"):
-		_ui.on_phase_launch(wave)
+	call_deferred("_begin_run", _release_power)
 
 
 func _on_fell_over() -> void:
@@ -264,25 +246,31 @@ func _on_victory_complete() -> void:
 
 
 func _finish_fell_over() -> void:
-	_set_goal_active(false)
 	_top.set_run_active(false)
 	_overlay_busy = true
 	if _ui.has_method("on_fell_over"):
 		_ui.on_fell_over()
 
 
-func _on_goal_body(body: Node) -> void:
-	if phase != Phase.RUN or body != _top or _overlay_busy:
-		return
-	call_deferred("_finish_goal", body)
+func _physics_process(_delta: float) -> void:
+	_check_goal_reached()
 
 
-func _finish_goal(_body: Node) -> void:
+## Win only when the top's centre is actually on the single goal tile.
+func _check_goal_reached() -> bool:
+	if phase != Phase.RUN or _overlay_busy or not _top.is_run_active():
+		return false
+	if not _maze.is_on_goal_tile(_top.global_position):
+		return false
+	_finish_goal()
+	return true
+
+
+func _finish_goal() -> void:
 	if phase != Phase.RUN:
 		return
-	_set_goal_active(false)
 	phase = Phase.GOAL_FALL
-	_top.start_goal_victory(_maze.goal_area_rect().get_center())
+	_top.start_goal_victory()
 
 
 func request_retry_same_wave() -> void:

@@ -328,7 +328,7 @@ func _wave_header(w: int) -> void:
 
 
 func on_phase_intro(w: int) -> void:
-	_lbl_wave.text = "Wave %d — Wind-up… (tap to skip)" % w
+	_lbl_wave.text = "Wave %d — Release! (tap to skip)" % w
 	_wave_header(w)
 	_hide_overlay()
 

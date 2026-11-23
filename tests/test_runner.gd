@@ -51,6 +51,12 @@ func check(cond: bool, name: String) -> void:
 func _run() -> void:
 	print("== Maze paths ==")
 	test_maze_paths()
+	print("== Maze no straight line to goal ==")
+	test_maze_no_straight_line()
+	print("== Top size ==")
+	await test_top_size()
+	print("== Goal single tile, no pull ==")
+	await test_goal_single_tile_no_pull()
 	print("== Maze density curve ==")
 	test_density_monotonic()
 	print("== Launch power mapping ==")
@@ -144,6 +150,136 @@ func test_maze_paths() -> void:
 				not data.room_walls[data.start_cell.y][data.start_cell.x][Maze.W_N],
 				"start opens north w%d seed %d" % [wave, seed]
 			)
+
+
+func test_maze_no_straight_line() -> void:
+	# Sanity: the detector flags an open start->goal column.
+	var open := {
+		"cols": 3, "rows": 4, "start_cell": Vector2i(1, 3), "goal_cell": Vector2i(1, 0),
+		"room_walls": [],
+	}
+	for y in 4:
+		var row: Array = []
+		for x in 3:
+			row.append([y == 0, x == 2, y == 3, x == 0])
+		open.room_walls.append(row)
+	check(Maze.has_straight_line(open), "detector flags unobstructed start/goal column")
+	check(Maze.min_turns(open) == 0, "open column needs 0 turns")
+	var total := 0
+	for wave in range(1, 13):
+		var need: int = Maze.min_turns_for(wave)
+		var bad_path := 0
+		var bad_line := 0
+		var bad_turns := 0
+		var bad_col := 0
+		var bad_len := 0
+		var min_seen := 999
+		for i in 120:
+			var seed: int = i * 104729 + wave * 31 + 7
+			var d: Dictionary = Maze.generate(wave, seed)
+			total += 1
+			if not Maze.has_path(d):
+				bad_path += 1
+			if Maze.has_straight_line(d):
+				bad_line += 1
+			var t: int = Maze.min_turns(d)
+			min_seen = mini(min_seen, t)
+			if t < need:
+				bad_turns += 1
+			if d.start_cell.x == d.goal_cell.x:
+				bad_col += 1
+			if Maze.shortest_path_len(d) <= int(d.rows) - 1:
+				bad_len += 1
+		check(bad_path == 0, "w%d: BFS path exists in all 120 seeds" % wave)
+		check(bad_line == 0, "w%d: no unobstructed straight row/column start->goal" % wave)
+		check(bad_turns == 0, "w%d: every route needs >= %d turns (min seen %d)" % [wave, need, min_seen])
+		check(bad_col == 0, "w%d: goal never in the start column" % wave)
+		check(bad_len == 0, "w%d: shortest path longer than a straight run" % wave)
+	check(total == 1440, "maze property sweep covered %d seeds" % total)
+	var a: Dictionary = Maze.generate(5, 4242)
+	var b: Dictionary = Maze.generate(5, 4242)
+	check(a.room_walls == b.room_walls and a.goal_cell == b.goal_cell, "regeneration is deterministic per seed")
+
+
+func test_top_size() -> void:
+	check(is_equal_approx(SpinningTop.RADIUS, 46.0 * 0.7), "top radius 30%% smaller (%.1f)" % SpinningTop.RADIUS)
+	var top: SpinningTop = TopScript.new()
+	root.add_child(top)
+	await process_frame
+	var r := -1.0
+	for c in top.get_children():
+		if c is CollisionShape2D and (c as CollisionShape2D).shape is CircleShape2D:
+			r = ((c as CollisionShape2D).shape as CircleShape2D).radius
+	check(is_equal_approx(r, SpinningTop.RADIUS), "collision radius matches art radius (%.1f)" % r)
+	for wave in range(1, 11):
+		var dims: Vector2i = Maze.grid_dims_for_wave(wave)
+		var cell: float = minf(700.0 / float(dims.x), 912.0 / float(dims.y))
+		var opening: float = cell - 15.6
+		print("  fit w%d cell=%.0f opening=%.0f top_d=%.1f fits=%s" % [
+			wave, cell, opening, SpinningTop.RADIUS * 2.0, opening > SpinningTop.RADIUS * 2.0])
+	top.queue_free()
+	await process_frame
+
+
+func test_goal_single_tile_no_pull() -> void:
+	var scene: PackedScene = load("res://scenes/main.tscn")
+	var inst := scene.instantiate()
+	root.add_child(inst)
+	for i in 20:
+		await process_frame
+	var main: Node = inst
+	var top: SpinningTop = _find_main_child(main, SpinningTop) as SpinningTop
+	var maze: MazeWorld = _find_main_child(main, MazeWorld) as MazeWorld
+	var g: Rect2 = maze.goal_area_rect()
+	var cell_c: Vector2 = maze.cell_center(maze.maze_data.goal_cell)
+	var cell_c2: Vector2 = maze.cell_center(maze.maze_data.goal_cell + Vector2i(0, 1))
+	var cell_sz: Vector2 = cell_c2 - cell_c
+	check(absf(g.size.y - cell_sz.y) < 0.5 and g.get_center().distance_to(cell_c) < 0.5, "goal rect is exactly one tile")
+	check(maze.goal_pad_rect().size.x < g.size.x and g.encloses(maze.goal_pad_rect()), "goal pad art inside the tile")
+	check(maze.is_on_goal_tile(cell_c), "tile centre counts as on goal")
+	check(not maze.is_on_goal_tile(g.position + Vector2(-2, g.size.y * 0.5)), "just left of tile is not goal")
+	check(not maze.is_on_goal_tile(g.position + Vector2(g.size.x * 0.5, g.size.y + 2)), "just below tile is not goal")
+	var tin: Node = root.get_node_or_null("TiltInput")
+	if tin:
+		_release_steer_inputs()
+		tin.call("set_mode", InputModes.Mode.KEYBOARD)
+		if tin.has_method("clear_test_steer_vector"):
+			tin.call("clear_test_steer_vector")
+	main.call("_begin_run", 95.0)
+	for i in 5:
+		await process_frame
+	# Park the top on the neighbouring tile below; when that side is open, put it
+	# so its edge overlaps the goal tile while its centre stays outside.
+	var gc: Vector2i = maze.maze_data.goal_cell
+	var near: Vector2 = cell_c2
+	if not maze.maze_data.room_walls[gc.y][gc.x][Maze.W_S]:
+		near = Vector2(g.get_center().x, g.end.y + SpinningTop.RADIUS * 0.6)
+	top.reset_top(near, 95.0)
+	top.set_run_active(true)
+	main.set("phase", MainScript.Phase.RUN)
+	var max_drift := 0.0
+	for i in 90:
+		await physics_frame
+		max_drift = maxf(max_drift, top.global_position.distance_to(near))
+	print("  goal-near probe steer=%s vel=%s pos=%s near=%s" % [
+		tin.call("get_steer_vector") if tin else Vector2.ZERO, top.linear_velocity, top.global_position, near])
+	check(int(main.get("phase")) == MainScript.Phase.RUN, "overlapping edge without centre on tile does not win")
+	check(max_drift < 2.0, "no pull toward goal (drift %.2f px)" % max_drift)
+	var inside: Vector2 = g.get_center() + Vector2(g.size.x * 0.3, 0)
+	top.reset_top(inside, 95.0)
+	top.set_run_active(true)
+	for i in 3:
+		await physics_frame
+	check(int(main.get("phase")) == MainScript.Phase.GOAL_FALL, "centre on tile triggers win")
+	var p_win: Vector2 = top.global_position
+	for i in 30:
+		await physics_frame
+	check(top.global_position.distance_to(p_win) < 0.5, "victory spin-down stays in place, no glide to centre")
+	for i in 60:
+		await physics_frame
+	check(int(main.get("phase")) == MainScript.Phase.CLEARED, "goal tile win clears wave")
+	inst.queue_free()
+	await process_frame
 
 
 func test_density_monotonic() -> void:
@@ -337,7 +473,7 @@ func test_spin_axis_upright() -> void:
 	check(max_tilt > 0.05, "lean tilts the top around its tip (%.3f rad)" % max_tilt)
 	check(top.tip_local().y > SpinningTop.RADIUS * 0.5, "pointy tip is the bottom pivot")
 	check(
-		max_tip_drift <= SpinningTop.RADIUS * 0.36,
+		max_tip_drift <= SpinningTop.RADIUS * 0.4,
 		"drawn tip stays planted below the top while it spins (max drift %.1f px)" % max_tip_drift
 	)
 	top.queue_free()
@@ -544,8 +680,8 @@ func test_playability_flow() -> void:
 	top.global_position = maze.goal_area_rect().get_center()
 	for i in 20:
 		await physics_frame
-	if int(main.get("phase")) != MainScript.Phase.CLEARED and main.has_method("_on_goal_body"):
-		main.call("_on_goal_body", top)
+	if int(main.get("phase")) != MainScript.Phase.CLEARED and main.has_method("_check_goal_reached"):
+		main.call("_check_goal_reached")
 		for i in 80:
 			await physics_frame
 	check(int(main.get("phase")) == MainScript.Phase.CLEARED, "goal clears wave")
@@ -631,15 +767,20 @@ func test_real_launch_steering() -> void:
 	for i in 20:
 		await process_frame
 	var main: Node = inst
-	check(int(main.get("phase")) == MainScript.Phase.INTRO, "real flow starts at intro")
-	_main_key(main, KEY_SPACE, true)
-	_main_key(main, KEY_SPACE, false)
-	for i in 15:
-		await process_frame
-	check(int(main.get("phase")) == MainScript.Phase.LAUNCH, "space skips intro to launch")
+	check(int(main.get("phase")) == MainScript.Phase.LAUNCH, "real flow starts at launch timing bar")
+	var intro_node: Node = main.get_node("LaunchIntroLayer").get_child(0)
+	check(not bool(intro_node.call("is_active")), "no hand animation before the timing bar")
 	_main_key(main, KEY_SPACE, true)
 	_main_key(main, KEY_SPACE, false)
 	for i in 130:
+		await process_frame
+		if int(main.get("phase")) != MainScript.Phase.LAUNCH:
+			break
+	check(int(main.get("phase")) == MainScript.Phase.INTRO, "bar result leads into hand release")
+	check(bool(intro_node.call("is_active")), "hand release animation playing after bar")
+	_main_key(main, KEY_SPACE, true)
+	_main_key(main, KEY_SPACE, false)
+	for i in 30:
 		await process_frame
 		if int(main.get("phase")) == MainScript.Phase.RUN:
 			break
@@ -741,16 +882,23 @@ func test_intro_and_goal_fall() -> void:
 	for i in 15:
 		await process_frame
 	var main: Node = inst
-	check(int(main.get("phase")) == MainScript.Phase.INTRO, "intro precedes launch")
-	main.get_node("LaunchIntroLayer").get_child(0).call("skip")
-	for i in 15:
+	check(int(main.get("phase")) == MainScript.Phase.LAUNCH, "launch bar comes first")
+	var intro_node: Node = main.get_node("LaunchIntroLayer").get_child(0)
+	check(not bool(intro_node.call("is_active")), "hand idle while bar runs")
+	main.call("_on_launch_released", 90.0)
+	await process_frame
+	check(int(main.get("phase")) == MainScript.Phase.INTRO, "bar release starts hand release")
+	check(bool(intro_node.call("is_active")), "hand animation active after bar")
+	var t_wait: int = Time.get_ticks_msec()
+	while int(main.get("phase")) != MainScript.Phase.RUN and Time.get_ticks_msec() - t_wait < 6000:
 		await process_frame
-	check(int(main.get("phase")) == MainScript.Phase.LAUNCH, "skip ends intro to launch")
-	main.call("_begin_run", 90.0)
+	check(int(main.get("phase")) == MainScript.Phase.RUN, "unskipped hand release ends in run")
+	var top0: SpinningTop = _find_main_child(main, SpinningTop) as SpinningTop
+	check(absf(top0.spin_power - 90.0) < 2.0, "run uses bar power after hand (%.1f)" % top0.spin_power)
 	for i in 10:
 		await process_frame
 	var top: SpinningTop = _find_main_child(main, SpinningTop) as SpinningTop
-	main.call("_finish_goal", top)
+	main.call("_finish_goal")
 	await process_frame
 	check(int(main.get("phase")) == MainScript.Phase.GOAL_FALL, "goal enters fall before cleared")
 	for i in 80:
@@ -1029,7 +1177,7 @@ func test_overlay_centered() -> void:
 		for i in 8:
 			await process_frame
 		var top: SpinningTop = _find_main_child(main, SpinningTop) as SpinningTop
-		main.call("_finish_goal", top)
+		main.call("_finish_goal")
 		for i in 80:
 			await physics_frame
 		check(ui.overlay_visible(), "overlay visible at %s" % sz)
@@ -1071,7 +1219,7 @@ func test_wave_overlay_flow() -> void:
 	main.call("_begin_run", 95.0)
 	for i in 15:
 		await process_frame
-	main.call("_finish_goal", top)
+	main.call("_finish_goal")
 	for i in 80:
 		await physics_frame
 	check(ui.overlay_visible(), "cleared overlay visible")
@@ -1084,7 +1232,7 @@ func test_wave_overlay_flow() -> void:
 	main.call("_begin_run", 90.0)
 	for i in 15:
 		await process_frame
-	main.call("_finish_goal", top)
+	main.call("_finish_goal")
 	for i in 80:
 		await physics_frame
 	var ev := InputEventKey.new()

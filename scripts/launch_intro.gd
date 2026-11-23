@@ -1,6 +1,7 @@
 class_name LaunchIntro
 extends Control
-## Skippable hand winding the top onto the start pad (~2.5 s).
+## Skippable hand release animation (~2.5 s). Plays AFTER the launch timing bar
+## resolves: the hand winds and lets go of the top on the start pad, then the run begins.
 
 signal finished
 

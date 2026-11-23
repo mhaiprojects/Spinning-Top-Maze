@@ -22,7 +22,9 @@ const HIT_VEL_SCALE := 0.6
 const HIT_COOLDOWN_MS := 150
 const STEER_FORCE := 480.0
 const MAX_LINEAR_SPEED := 520.0
-const RADIUS := 46.0
+## 30% smaller than the original 46 px; art and collision both scale from it.
+const BASE_RADIUS := 46.0
+const RADIUS := BASE_RADIUS * 0.7
 const TRAIL_JUMP := 100.0
 const TRAIL_LEN := 18
 const FALL_ANIM := 1.0
@@ -32,8 +34,6 @@ var spin_power: float = 100.0
 var _falling := false
 var _fall_t := 0.0
 var _fall_kind: FallKind = FallKind.NONE
-var _goal_target := Vector2.ZERO
-var _goal_start := Vector2.ZERO
 var _fall_power_start := 100.0
 var _wobble_phase := 0.0
 var _last_hit_ms := 0
@@ -175,13 +175,12 @@ func set_initial_power(p: float) -> void:
 	power_changed.emit(spin_power)
 
 
-func start_goal_victory(target: Vector2) -> void:
+## Victory spin-down in place on the goal tile (no pull toward the tile centre).
+func start_goal_victory() -> void:
 	_clear_trail()
 	_fall_kind = FallKind.GOAL
 	_falling = false
 	_fall_t = 0.0
-	_goal_target = target
-	_goal_start = global_position
 	_fall_power_start = spin_power
 	_run_active = false
 	collision_layer = 0
@@ -335,9 +334,8 @@ func visual_up_world() -> Vector2:
 func _advance_goal_fall(delta: float) -> void:
 	_fall_t += delta
 	var u: float = clampf(_fall_t / FALL_ANIM, 0.0, 1.0)
-	var glide: float = clampf(u / 0.55, 0.0, 1.0)
-	var ease: float = glide * glide * (3.0 - 2.0 * glide)
-	global_position = _goal_start.lerp(_goal_target, ease)
+	var settle: float = clampf(u / 0.55, 0.0, 1.0)
+	var ease: float = settle * settle * (3.0 - 2.0 * settle)
 	spin_power = lerpf(_fall_power_start, 8.0, ease)
 	power_changed.emit(spin_power)
 	if u > 0.55:

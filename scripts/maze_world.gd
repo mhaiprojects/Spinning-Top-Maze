@@ -60,11 +60,26 @@ func cell_center(cell: Vector2i) -> Vector2:
 	)
 
 
+## The winning tile: exactly the goal cell, nothing larger.
 func goal_area_rect() -> Rect2:
 	var g: Vector2i = maze_data.goal_cell
-	var c: Vector2 = cell_center(g)
-	var sz: Vector2 = _cell_size * 0.78
-	return Rect2(c - sz * 0.5, sz)
+	return Rect2(
+		_play_rect.position + Vector2(float(g.x) * _cell_size.x, float(g.y) * _cell_size.y),
+		_cell_size
+	)
+
+
+## True only when the point (the top's centre) is on the goal tile itself.
+func is_on_goal_tile(p: Vector2) -> bool:
+	if maze_data.is_empty():
+		return false
+	return goal_area_rect().has_point(p)
+
+
+## Goal pad art: the goal tile minus the wall band, so it stays inside 1 tile.
+func goal_pad_rect() -> Rect2:
+	var t: Rect2 = goal_area_rect()
+	return Rect2(t.position + Vector2(_wall_thick, _wall_thick), t.size - Vector2(_wall_thick, _wall_thick))
 
 
 func start_area_rect() -> Rect2:
@@ -241,21 +256,23 @@ func _draw_start_pad() -> void:
 
 
 func _draw_goal_pad() -> void:
-	var goal_r: Rect2 = goal_area_rect()
+	var goal_r: Rect2 = goal_pad_rect()
 	var gc: Vector2 = goal_r.get_center()
 	var pulse: float = 0.5 + 0.5 * sin(_goal_pulse)
+	var max_r: float = minf(goal_r.size.x, goal_r.size.y) * 0.5
 	for ring_i in 3:
-		var rr: float = goal_r.size.x * (0.55 + float(ring_i) * 0.18 + pulse * 0.06)
+		var rr: float = max_r * (0.55 + float(ring_i) * 0.15 + pulse * 0.08)
 		var alpha: float = 0.22 - float(ring_i) * 0.05
-		draw_arc(gc, rr, 0, TAU, 32, Color(0.15, 0.95, 0.55, alpha + pulse * 0.08), 4.0, true)
-	draw_circle(gc + Vector2(0, 4), goal_r.size.x * 0.38, Color(0, 0, 0, 0.2))
+		draw_arc(gc, rr, 0, TAU, 32, Color(0.15, 0.95, 0.55, alpha + pulse * 0.08), 3.0, true)
+	draw_circle(gc + Vector2(0, 4), max_r * 0.6, Color(0, 0, 0, 0.2))
 	var pads: Dictionary = PlayBg.pad_style(play_background_id)
 	draw_rect(goal_r, pads.goal_fill)
 	draw_rect(goal_r, Color(pads.goal_border.r, pads.goal_border.g, pads.goal_border.b, pads.goal_border.a + pulse * 0.45), false, 3.0)
 	var flag_h: float = goal_r.size.y * 0.55
 	draw_line(gc + Vector2(0, -goal_r.size.y * 0.35), gc + Vector2(0, -goal_r.size.y * 0.35 + flag_h), Color(0.95, 0.95, 1.0), 3.0)
-	var tip := gc + Vector2(6, -goal_r.size.y * 0.35 + 4)
+	var tip := gc + Vector2(3, -goal_r.size.y * 0.35 + 2)
+	var fl: float = clampf(max_r * 0.45, 8.0, 24.0)
 	draw_colored_polygon(
-		PackedVector2Array([tip, tip + Vector2(24, 10), tip + Vector2(0, 20)]),
+		PackedVector2Array([tip, tip + Vector2(fl, fl * 0.42), tip + Vector2(0, fl * 0.84)]),
 		Color(1.0, 0.35, 0.32, 0.9)
 	)

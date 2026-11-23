@@ -130,14 +130,15 @@ func _run() -> void:
 	if not _flow:
 		_save("shot.png")
 		return
-	await process_frame
-	_save("v3_intro.png")
-	await _skip_intro(main)
 	for i in 8:
 		await process_frame
 	_save("v3_minigame.png")
 	var power: float = Launch.power_for_offset(0.0)
-	main.call("_begin_run", power)
+	main.call("_on_launch_released", power)
+	for i in 40:
+		await process_frame
+	_save("v3_intro.png")
+	await _skip_intro(main)
 	for i in 12:
 		await process_frame
 	for i in 120:
@@ -185,7 +186,7 @@ func _run() -> void:
 		top.wake_for_run()
 		top.global_position = maze.goal_area_rect().get_center()
 		top.reset_top(maze.goal_area_rect().get_center(), top.spin_power)
-		main.call("_on_goal_body", top)
+		main.call("_check_goal_reached")
 		for i in 35:
 			await physics_frame
 		_save("v3_goal_fall.png")

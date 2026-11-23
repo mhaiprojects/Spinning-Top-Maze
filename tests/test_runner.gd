@@ -114,6 +114,8 @@ func _run() -> void:
 	test_physics_save_load()
 	await test_physics_live_tuning()
 	await test_physics_settings_menu()
+	test_physics_manual_entry_validation()
+	await test_physics_extreme_simulation()
 	print("== Settings gear HUD ==")
 	await test_settings_gear_hud()
 	await test_hud_play_layout()
@@ -1339,7 +1341,7 @@ func test_physics_defaults() -> void:
 	)
 	for d in PhysicsSettings.DEFS:
 		var dv: float = float(d.default)
-		check(dv >= float(d.min) and dv <= float(d.max), "default %s within range" % d.key)
+		check(is_finite(dv), "default %s is finite" % d.key)
 
 
 func test_physics_settings_migration() -> void:
@@ -1460,8 +1462,12 @@ func test_lean_and_precession() -> void:
 	PhysicsSettings.reset_all()
 	var shaped: Vector2 = TopPhysics.shape_input(Vector2(1.0, 0.0))
 	var lean_max: float = deg_to_rad(PhysicsSettings.get_value("lean_max_deg"))
-	var hi_scale: float = maxf(PhysicsSettings.get_value("high_scale"), 0.01)
-	var target: Vector2 = shaped * (lean_max / hi_scale)
+	var hi_scale: float = PhysicsSettings.get_value("high_scale")
+	var target: Vector2
+	if absf(hi_scale) > 1e-9:
+		target = shaped * (lean_max / hi_scale)
+	else:
+		target = Vector2.ZERO
 	var lean := Vector2.ZERO
 	for i in 180:
 		lean = TopPhysics.spring_lean(
@@ -1587,6 +1593,83 @@ func test_physics_live_tuning() -> void:
 	PhysicsSettings.reset_all()
 
 
+func _count_nodes_of_type(node: Node, type_name: String) -> int:
+	var n := 0
+	if node.get_class() == type_name:
+		n += 1
+	for c in node.get_children():
+		n += _count_nodes_of_type(c, type_name)
+	return n
+
+
+func test_physics_manual_entry_validation() -> void:
+	check(PhysicsSettings.parse_finite_number("7.5") == 7.5, "parse_finite_number 7.5")
+	check(PhysicsSettings.parse_finite_number("-50") == -50.0, "parse_finite_number negative")
+	check(PhysicsSettings.parse_finite_number("abc") == null, "parse_finite_number rejects abc")
+	check(PhysicsSettings.parse_finite_number("") == null, "parse_finite_number rejects empty")
+	check(PhysicsSettings.parse_finite_number("nan") == null, "parse_finite_number rejects nan")
+	check(PhysicsSettings.parse_finite_number("inf") == null, "parse_finite_number rejects inf")
+	PhysicsSettings.reset_all()
+	PhysicsSettings.set_value("tilt_sensitivity", 12.0)
+	check(PhysicsSettings.set_value("steer_force", 1e6), "set extreme steer_force")
+	var path := SETTINGS_TEST + ".out_of_range"
+	if FileAccess.file_exists(path):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	PhysicsSettings.save_to_path(path)
+	PhysicsSettings.reset_all()
+	PhysicsSettings.load_from_path(path)
+	check(
+		is_equal_approx(PhysicsSettings.get_value("tilt_sensitivity"), 12.0),
+		"save/load tilt_sensitivity out of suggested range"
+	)
+	check(
+		is_equal_approx(PhysicsSettings.get_value("steer_force"), 1e6),
+		"save/load steer_force 1e6"
+	)
+	var cfg := ConfigFile.new()
+	cfg.load(path)
+	cfg.set_value("physics", "max_speed", "not-a-number")
+	cfg.save(path)
+	PhysicsSettings.reset_all()
+	PhysicsSettings.load_from_path(path)
+	check(
+		is_equal_approx(PhysicsSettings.get_value("max_speed"), TopScript.MAX_LINEAR_SPEED),
+		"load invalid cfg value falls back to default"
+	)
+	PhysicsSettings.reset_all()
+
+
+func test_physics_extreme_simulation() -> void:
+	PhysicsSettings.reset_all()
+	PhysicsSettings.set_value("steer_force", 1e6)
+	PhysicsSettings.set_value("max_speed", 0.0)
+	PhysicsSettings.set_value("high_scale", 0.0)
+	PhysicsSettings.set_value("lean_stiffness", 0.0)
+	PhysicsSettings.set_value("precession_rate", 1000.0)
+	PhysicsSettings.set_value("tilt_sensitivity", 0.0)
+	var top: SpinningTop = TopScript.new()
+	root.add_child(top)
+	await process_frame
+	top.set_run_active(true)
+	top.set_initial_power(100.0)
+	top.global_position = Vector2(360, 640)
+	var tin: Node = root.get_node_or_null("TiltInput")
+	if tin:
+		if tin.has_method("set_steer_blocked"):
+			tin.call("set_steer_blocked", false)
+		if tin.has_method("set_test_steer_vector"):
+			tin.call("set_test_steer_vector", Vector2(0.6, -0.8))
+	for i in 120:
+		await physics_frame
+		check(top.global_position.is_finite(), "extreme physics frame %d position finite" % i)
+		check(top.linear_velocity.is_finite(), "extreme physics frame %d velocity finite" % i)
+	if tin and tin.has_method("clear_test_steer_vector"):
+		tin.call("clear_test_steer_vector")
+	top.queue_free()
+	await process_frame
+	PhysicsSettings.reset_all()
+
+
 func test_physics_settings_menu() -> void:
 	PhysicsSettings.reset_all()
 	var scene: PackedScene = load("res://scenes/main.tscn")
@@ -1605,31 +1688,42 @@ func test_physics_settings_menu() -> void:
 		await process_frame
 	check(menu.is_open(), "gear opens settings menu")
 	check(paused, "settings menu pauses tree")
-	var steer_def: Dictionary = {}
-	for d in PhysicsSettings.DEFS:
-		if d.key == "steer_force":
-			steer_def = d
-			break
-	var slider: HSlider = menu.slider_for_key("steer_force")
-	var spin: SpinBox = menu.spinbox_for_key("steer_force")
-	check(slider != null and spin != null, "menu row steer_force controls")
-	slider.value = 700.0
-	for i in 3:
+	check(menu.lineedit_for_key("steer_force") != null, "menu row steer_force LineEdit")
+	var phys_box: VBoxContainer = menu.physics_vbox()
+	check(_count_nodes_of_type(phys_box, "HSlider") == 0, "settings menu has no HSlider")
+	check(_count_nodes_of_type(phys_box, "SpinBox") == 0, "settings menu has no SpinBox")
+	var edit: LineEdit = menu.lineedit_for_key("steer_force")
+	edit.text = "7.5"
+	edit.text_submitted.emit("7.5")
+	for i in 2:
 		await process_frame
-	check(is_equal_approx(spin.value, 700.0), "slider syncs to spinbox")
-	spin.value = 820.0
-	for i in 3:
-		await process_frame
-	check(is_equal_approx(slider.value, 820.0), "spinbox syncs to slider")
-	spin.value = 50.0
-	for i in 3:
-		await process_frame
-	check(
-		spin.value >= float(steer_def.get("min", 100.0)),
-		"spinbox clamps low to min (steer row was %.1f)" % spin.value
-	)
+	check(is_equal_approx(PhysicsSettings.get_value("steer_force"), 7.5), "typing 7.5 commits steer_force")
+	var before_steer: float = PhysicsSettings.get_value("steer_force")
+	edit.text = "abc"
+	menu.call("_commit_field", "steer_force", "abc", edit)
+	check(is_equal_approx(PhysicsSettings.get_value("steer_force"), before_steer), "reject abc")
+	for bad in ["", "nan", "inf"]:
+		edit.text = bad
+		menu.call("_commit_field", "steer_force", bad, edit)
+		check(is_equal_approx(PhysicsSettings.get_value("steer_force"), before_steer), "reject %s" % bad)
+	var tilt_edit: LineEdit = menu.lineedit_for_key("tilt_sensitivity")
+	tilt_edit.text = "12"
+	menu.call("_commit_field", "tilt_sensitivity", "12", tilt_edit)
+	check(is_equal_approx(PhysicsSettings.get_value("tilt_sensitivity"), 12.0), "tilt_sensitivity 12 accepted")
+	var lean_edit: LineEdit = menu.lineedit_for_key("lean_max_deg")
+	lean_edit.text = "89"
+	menu.call("_commit_field", "lean_max_deg", "89", lean_edit)
+	check(is_equal_approx(PhysicsSettings.get_value("lean_max_deg"), 89.0), "lean_max_deg 89 accepted")
+	var max_edit: LineEdit = menu.lineedit_for_key("max_speed")
+	max_edit.text = "-50"
+	menu.call("_commit_field", "max_speed", "-50", max_edit)
+	check(is_equal_approx(PhysicsSettings.get_value("max_speed"), -50.0), "max_speed -50 accepted")
+	var damp_edit: LineEdit = menu.lineedit_for_key("linear_damp")
+	damp_edit.text = "0"
+	menu.call("_commit_field", "linear_damp", "0", damp_edit)
+	check(is_equal_approx(PhysicsSettings.get_value("linear_damp"), 0.0), "linear_damp 0 accepted")
 	var bg_before: int = int(tin.call("selected_background"))
-	var line: LineEdit = spin.get_line_edit()
+	var line: LineEdit = menu.lineedit_for_key("steer_force")
 	line.grab_focus()
 	for k in 4:
 		await process_frame
@@ -1644,10 +1738,10 @@ func test_physics_settings_menu() -> void:
 	ui.call("_unhandled_input", key_b_up)
 	for i in 6:
 		await process_frame
-	check(int(tin.call("selected_background")) == bg_before, "B ignored while spinbox focused in menu")
+	check(int(tin.call("selected_background")) == bg_before, "B ignored while LineEdit focused in menu")
 	PhysicsSettings.reset("steer_force")
 	menu.call("_refresh_row", "steer_force")
-	check(is_equal_approx(spin.value, TopScript.STEER_FORCE), "per-row reset in menu")
+	check(is_equal_approx(PhysicsSettings.get_value("steer_force"), TopScript.STEER_FORCE), "per-row reset in menu")
 	menu.call("_on_reset_all")
 	await process_frame
 	check(is_equal_approx(PhysicsSettings.get_value("steer_force"), TopScript.STEER_FORCE), "reset all in menu")

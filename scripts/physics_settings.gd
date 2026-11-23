@@ -194,11 +194,38 @@ static func _bump_revision() -> void:
 	_revision += 1
 
 
-static func _clamp_key(key: String, v: float) -> float:
-	var d: Dictionary = _def_for(key)
-	if d.is_empty():
+static func _finite_or_default(key: String, v: float) -> float:
+	if is_finite(v):
 		return v
-	return clampf(v, float(d.min), float(d.max))
+	return float(_def_for(key).get("default", 0.0))
+
+
+static func parse_finite_number(text: String) -> Variant:
+	var t: String = text.strip_edges()
+	if t.is_empty():
+		return null
+	var lower: String = t.to_lower()
+	if lower in ["nan", "inf", "-inf", "infinity", "+inf", "-infinity"]:
+		return null
+	if not t.is_valid_float():
+		return null
+	var v: float = float(t)
+	if not is_finite(v):
+		return null
+	return v
+
+
+static func display_value(key: String) -> String:
+	return format_number(get_value(key))
+
+
+static func format_number(v: float) -> String:
+	if not is_finite(v):
+		return "0"
+	if absf(v - roundf(v)) < 0.00001:
+		return str(snapped(v, 1.0))
+	var r: float = snappedf(v, 0.000001)
+	return str(r)
 
 
 static func get_value(key: String) -> float:
@@ -210,16 +237,18 @@ static func get_value(key: String) -> float:
 	return float(d.get("default", 0.0))
 
 
-static func set_value(key: String, v: float) -> void:
+static func set_value(key: String, v: float) -> bool:
 	if _values.is_empty():
 		reset_all()
 	if _def_for(key).is_empty():
-		return
-	var cv: float = _clamp_key(key, v)
-	if _values.get(key, null) == cv:
-		return
-	_values[key] = cv
+		return false
+	if not is_finite(v):
+		return false
+	if _values.get(key, null) == v:
+		return true
+	_values[key] = v
 	_bump_revision()
+	return true
 
 
 static func load_from_path(path: String = UserSettings.DEFAULT_PATH) -> void:
@@ -232,7 +261,15 @@ static func load_from_path(path: String = UserSettings.DEFAULT_PATH) -> void:
 		for d in DEFS:
 			var k: String = d.key
 			if cfg.has_section_key(SECTION, k):
-				_values[k] = _clamp_key(k, float(cfg.get_value(SECTION, k, d.default)))
+				var raw: Variant = cfg.get_value(SECTION, k, d.default)
+				if typeof(raw) == TYPE_STRING:
+					var parsed: Variant = parse_finite_number(str(raw))
+					if parsed == null:
+						_values[k] = float(d.default)
+					else:
+						_values[k] = float(parsed)
+				else:
+					_values[k] = _finite_or_default(k, float(raw))
 		if cfg.has_section_key(SECTION, VERSION_KEY):
 			saved_ver = int(cfg.get_value(SECTION, VERSION_KEY, 0))
 	elif OS.has_feature("web"):
@@ -298,7 +335,7 @@ static func _load_local_storage() -> int:
 	var dct: Dictionary = parsed
 	for d in DEFS:
 		if dct.has(d.key):
-			_values[d.key] = _clamp_key(d.key, float(dct[d.key]))
+			_values[d.key] = _finite_or_default(d.key, float(dct[d.key]))
 	if dct.has(VERSION_KEY):
 		return int(dct[VERSION_KEY])
 	return 0

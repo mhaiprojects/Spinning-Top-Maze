@@ -23,8 +23,14 @@ static func smooth_alpha(delta: float, response_rate: float, base_smooth: float 
 
 
 static func map_device_tilt(angles_deg: Vector2, full_scale_deg: float, sensitivity: float) -> Vector2:
-	var scale: float = maxf(full_scale_deg, 1.0)
+	if not angles_deg.is_finite():
+		return Vector2.ZERO
+	if not is_finite(sensitivity) or not is_finite(full_scale_deg):
+		return Vector2.ZERO
+	var scale: float = maxf(absf(full_scale_deg), 1e-6)
 	var v: Vector2 = angles_deg / scale * sensitivity
+	if not v.is_finite():
+		return Vector2.ZERO
 	var L: float = v.length()
 	if L > 1.0:
 		v /= L
@@ -32,11 +38,17 @@ static func map_device_tilt(angles_deg: Vector2, full_scale_deg: float, sensitiv
 
 
 static func map_accel_tilt(accel: Vector2, sensitivity: float) -> Vector2:
+	if not is_finite(sensitivity):
+		return Vector2.ZERO
 	var device: Vector2 = device_steer_from_accel(accel)
+	if not device.is_finite():
+		return Vector2.ZERO
 	var L: float = device.length()
 	if L < 0.0001:
 		return Vector2.ZERO
 	var v: Vector2 = device * sensitivity
+	if not v.is_finite():
+		return Vector2.ZERO
 	if v.length() > 1.0:
 		v = v.normalized()
 	return v

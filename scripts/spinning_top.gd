@@ -230,8 +230,16 @@ func _physics_process(delta: float) -> void:
 	var tilt: Vector2 = _tilt_vector()
 	var shaped: Vector2 = TopPhysics.shape_input(tilt)
 	var lean_max_rad: float = deg_to_rad(PhysicsSettings.get_value("lean_max_deg"))
-	var hi_scale: float = maxf(PhysicsSettings.get_value("high_scale"), 0.01)
-	var target_lean: Vector2 = shaped * (lean_max_rad / hi_scale)
+	if not is_finite(lean_max_rad):
+		lean_max_rad = 0.0
+	var hi_scale: float = PhysicsSettings.get_value("high_scale")
+	var target_lean: Vector2
+	if is_finite(hi_scale) and absf(hi_scale) > 1e-9:
+		target_lean = shaped * (lean_max_rad / hi_scale)
+	else:
+		target_lean = Vector2.ZERO
+	if not target_lean.is_finite():
+		target_lean = Vector2.ZERO
 	var stiffness: float = PhysicsSettings.get_value("lean_stiffness")
 	_lean = TopPhysics.spring_lean(_lean, target_lean, stiffness, delta)
 	var spin_norm: float = maxf(spin_power / 100.0, 0.15)
@@ -240,25 +248,33 @@ func _physics_process(delta: float) -> void:
 		spin_sign = 1.0
 	var prec_rate: float = PhysicsSettings.get_value("precession_rate")
 	_lean = TopPhysics.apply_precession(_lean, spin_norm, prec_rate, delta, spin_sign)
-	if prec_rate > 0.0001:
-		_precess_phase = wrapf(
-			_precess_phase + prec_rate * _lean.length() / spin_norm * delta * spin_sign, 0.0, TAU
-		)
+	if prec_rate > 0.0001 and is_finite(prec_rate):
+		var phase_delta: float = prec_rate * _lean.length() / spin_norm * delta * spin_sign
+		if is_finite(phase_delta):
+			_precess_phase = wrapf(_precess_phase + phase_delta, 0.0, TAU)
 	var lean_len: float = _lean.length()
 	if lean_len > 0.0001:
 		if sleeping:
 			sleeping = false
 		var lean_cap: float = maxf(lean_max_rad, 0.001)
 		var steer_f: float = PhysicsSettings.get_value("steer_force")
+		var hi_eff: float = hi_scale if is_finite(hi_scale) else 0.0
 		# Lean is capped at lean_max for the art; the high tier's extra punch
 		# comes back via hi_scale so a hard tilt drives up to high_scale x steer_force.
 		var force_mag: float = (
-			(lean_len / lean_cap) * hi_scale * steer_f * (0.35 + 0.65 * spin_power / 100.0)
+			(lean_len / lean_cap) * hi_eff * steer_f * (0.35 + 0.65 * spin_power / 100.0)
 		)
-		apply_central_force(_lean.normalized() * force_mag)
+		if is_finite(force_mag) and force_mag != 0.0:
+			var dir: Vector2 = _lean.normalized()
+			if dir.is_finite():
+				apply_central_force(dir * force_mag)
 	var max_sp: float = PhysicsSettings.get_value("max_speed")
-	if linear_velocity.length() > max_sp:
-		linear_velocity = linear_velocity.normalized() * max_sp
+	if is_finite(max_sp) and max_sp > 0.0 and linear_velocity.is_finite():
+		var spd: float = linear_velocity.length()
+		if is_finite(spd) and spd > max_sp:
+			linear_velocity = linear_velocity.normalized() * max_sp
+	if not linear_velocity.is_finite():
+		linear_velocity = Vector2.ZERO
 	_wobble_phase += delta * (8.0 + spin_power * 0.12)
 	var spin_rate: float = (spin_power / 100.0) * 24.0
 	angular_velocity = lerp(angular_velocity, spin_rate, 0.15)
@@ -290,7 +306,8 @@ func _sync_physics_tunables() -> void:
 	if rev == _settings_rev:
 		return
 	_settings_rev = rev
-	linear_damp = PhysicsSettings.get_value("linear_damp")
+	var ld: float = PhysicsSettings.get_value("linear_damp")
+	linear_damp = ld if is_finite(ld) else 2.2
 
 
 func lean_vector() -> Vector2:
@@ -421,7 +438,11 @@ func apply_wall_hit(impact_speed: float, spark_local: Vector2 = Vector2.ZERO) ->
 	_spark_flash.position = spark_local
 	_spark_flash.emitting = true
 	_spark_flash.restart()
-	linear_velocity *= PhysicsSettings.get_value("wall_hit_slowdown")
+	var slow: float = PhysicsSettings.get_value("wall_hit_slowdown")
+	if is_finite(slow):
+		linear_velocity *= slow
+	if not linear_velocity.is_finite():
+		linear_velocity = Vector2.ZERO
 	hit_wall.emit()
 
 

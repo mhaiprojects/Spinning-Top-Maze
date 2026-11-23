@@ -81,10 +81,10 @@ The maze floor and wall colours follow a selectable **board** theme (procedural 
 
 ### Settings menu (gear)
 
-Opens a scrollable panel (game + physics). **Resume** or **Escape** closes, saves physics, and unpauses. While open, steering is blocked and the tree is paused. **Game:** input mode, board theme, calibrate tilt (when Tilt is selected), retry wave. **Physics:** tunable rows, **Reset all**. Shortcuts **M**, **B**, **Tab**, and **Space** still work when the menu is closed (physics SpinBoxes still capture keys when focused). Physics persist under `[physics]` + `physics_version` in `user://settings.cfg` (Web: `localStorage` `stm_physics`).
+Opens a scrollable panel (game + physics). **Resume** or **Escape** closes, saves physics, and unpauses. While open, steering is blocked and the tree is paused. **Game:** input mode, board theme, calibrate tilt (when Tilt is selected), retry wave. **Physics:** each tunable is a **label**, **number field** (type any finite value; Enter, focus loss, or closing the menu commits), and **Reset**; **Reset all** restores defaults. Shortcuts **M**, **B**, **Tab**, and **Space** still work when the menu is closed (a focused physics field still captures keys). On **mobile web**, tapping a physics field opens a browser `prompt` prefilled with the current value (`JavaScriptBridge`); desktop uses the field directly. We leave `html/experimental_virtual_keyboard=false` so the page does not fight that flow. Physics persist under `[physics]` + `physics_version` in `user://settings.cfg` (Web: `localStorage` `stm_physics`). Non-numeric, NaN, and Inf inputs are rejected; invalid saved values load as the key default.
 
-| Key | Label (menu) | Default | Range | Role |
-|-----|----------------|---------|-------|------|
+| Key | Label (menu) | Default | Suggested range | Role |
+|-----|----------------|---------|-----------------|------|
 | `tilt_response` | Tilt response | 3.0 | 0.5–4 | Frame-rate-independent input smoothing |
 | `tilt_sensitivity` | Tilt sensitivity | 3.0 | 0.25–3 | Tilt input gain |
 | `tilt_full_scale_deg` | Tilt full scale (deg) | 35 | 10–90 | Device angle mapped to full deflection |
@@ -96,12 +96,14 @@ Opens a scrollable panel (game + physics). **Resume** or **Escape** closes, save
 | `tier_threshold` | Tier threshold | 0.5 | 0.1–0.9 | Input magnitude where tiers blend |
 | `tier_blend` | Tier blend width | 0.18 | 0.02–0.4 | Smoothstep width at tier cross |
 | `steer_force` | Steer force | 480 | 100–1500 | Central force at full lean |
-| `max_speed` | Max speed | 520 | 150–1500 | Linear speed cap |
+| `max_speed` | Max speed | 520 | 150–1500 | Linear speed cap (≤0 disables cap; negative is treated as no cap) |
 | `linear_damp` | Linear damp | 2.2 | 0–8 | Rigid-body linear damping |
 | `spin_decay_mult` | Spin decay mult | 1.0 | 0–3 | Multiplier on wave spin decay |
 | `wall_hit_slowdown` | Wall hit slowdown | 0.6 | 0.1–1 | Velocity kept after a wall hit |
 | `wall_hit_loss_mult` | Wall hit loss mult | 1.0 | 0–3 | Multiplier on wall power loss |
 | `fall_threshold` | Fall threshold (%) | 0 | 0–40 | Fall when power ≤ threshold (0 = off) |
+
+**Extreme values:** anything finite is stored and applied. Examples: negative `max_speed` or `max_speed` 0 → no speed cap; `high_scale` 0 → no target lean from tier shaping (minimal steer from lean spring); `lean_stiffness` 0 → lean does not chase input; huge `steer_force` still clamps forces/velocity to finite numbers at use sites. Invalid math (NaN/Inf) is dropped rather than snapping back to the old menu min/max.
 
 Code: `scripts/physics_settings.gd` (tunables + save/load), `scripts/top_physics.gd` (tiers / lean math), `scripts/physics_menu.gd` (UI).
 

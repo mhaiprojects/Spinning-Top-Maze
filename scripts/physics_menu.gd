@@ -12,7 +12,6 @@ var _scroll: ScrollContainer
 var _game_vbox: VBoxContainer
 var _physics_vbox: VBoxContainer
 var _rows: Dictionary = {}
-var _syncing := false
 var _settings_path := "user://settings.cfg"
 var _btn_mode: Button
 var _btn_board: Button
@@ -136,41 +135,106 @@ func _menu_btn(text: String, cb: Callable) -> Button:
 	return b
 
 
+func _suggested_range_label(def: Dictionary) -> String:
+	var s: String = str(def.label)
+	if def.has("min") and def.has("max"):
+		s += " (suggest %s–%s)" % [
+			PhysicsSettings.format_number(float(def.min)),
+			PhysicsSettings.format_number(float(def.max)),
+		]
+	return s
+
+
 func _add_row(def: Dictionary) -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 6)
 	row.name = "Row_%s" % def.key
 	_physics_vbox.add_child(row)
 	var lbl := Label.new()
-	lbl.text = str(def.label)
+	lbl.text = _suggested_range_label(def)
 	lbl.custom_minimum_size = Vector2(140, 0)
-	lbl.add_theme_font_size_override("font_size", 16)
+	lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lbl.add_theme_font_size_override("font_size", 15)
 	row.add_child(lbl)
-	var slider := HSlider.new()
-	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	slider.min_value = float(def.min)
-	slider.max_value = float(def.max)
-	slider.step = float(def.step)
-	slider.value = PhysicsSettings.get_value(def.key)
-	row.add_child(slider)
-	var spin := SpinBox.new()
-	spin.custom_minimum_size = Vector2(96, 0)
-	spin.min_value = float(def.min)
-	spin.max_value = float(def.max)
-	spin.step = float(def.step)
-	spin.value = slider.value
-	spin.allow_greater = false
-	spin.allow_lesser = false
-	row.add_child(spin)
+	var edit := LineEdit.new()
+	edit.custom_minimum_size = Vector2(112, 40)
+	edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	edit.text = PhysicsSettings.display_value(def.key)
+	edit.clear_button_enabled = false
+	edit.text_submitted.connect(_on_line_submitted.bind(def.key, edit))
+	edit.focus_exited.connect(_on_line_focus_exited.bind(def.key, edit))
+	if _use_web_prompt():
+		edit.gui_input.connect(_on_line_gui.bind(def.key, edit))
+		edit.focus_mode = Control.FOCUS_CLICK
+	row.add_child(edit)
 	var reset := Button.new()
 	reset.text = "Reset"
 	reset.custom_minimum_size = Vector2(64, 40)
 	VT.apply_button_theme(reset)
 	reset.pressed.connect(_on_row_reset.bind(def.key))
 	row.add_child(reset)
-	slider.value_changed.connect(_on_slider_changed.bind(def.key, spin))
-	spin.value_changed.connect(_on_spin_changed.bind(def.key, slider))
-	_rows[def.key] = {"slider": slider, "spin": spin}
+	_rows[def.key] = {"edit": edit}
+
+
+func _use_web_prompt() -> bool:
+	return OS.has_feature("web") and InputModes.is_touch_device()
+
+
+func _on_line_gui(event: InputEvent, key: String, edit: LineEdit) -> void:
+	if not _use_web_prompt():
+		return
+	if event is InputEventScreenTouch and event.pressed:
+		_open_web_prompt(key, edit)
+		edit.accept_event()
+
+
+func _open_web_prompt(key: String, edit: LineEdit) -> void:
+	var cur_json: String = JSON.stringify(edit.text)
+	var js: String = (
+		"(function(){var v=prompt('Enter value',%s);if(v===null)return '';return v;})();" % cur_json
+	)
+	var res: Variant = JavaScriptBridge.eval(js, true)
+	if res == null:
+		return
+	var s: String = str(res)
+	if s.is_empty():
+		return
+	_commit_field(key, s, edit)
+
+
+func _on_line_submitted(text: String, key: String, edit: LineEdit) -> void:
+	_commit_field(key, text, edit)
+
+
+func _on_line_focus_exited(key: String, edit: LineEdit) -> void:
+	_commit_field(key, edit.text, edit)
+
+
+func _commit_field(key: String, text: String, edit: LineEdit) -> void:
+	var parsed: Variant = PhysicsSettings.parse_finite_number(text)
+	if parsed == null:
+		_flash_invalid(edit)
+		edit.text = PhysicsSettings.display_value(key)
+		return
+	if not PhysicsSettings.set_value(key, float(parsed)):
+		_flash_invalid(edit)
+		edit.text = PhysicsSettings.display_value(key)
+		return
+	edit.text = PhysicsSettings.display_value(key)
+
+
+func _flash_invalid(edit: LineEdit) -> void:
+	var base: Color = edit.modulate
+	edit.modulate = Color(1.0, 0.45, 0.45)
+	var tw := create_tween()
+	tw.tween_property(edit, "modulate", base, 0.35)
+
+
+func _commit_all_fields() -> void:
+	for key in _rows:
+		var edit: LineEdit = _rows[key].edit as LineEdit
+		_commit_field(key, edit.text, edit)
 
 
 func refresh_game_rows() -> void:
@@ -215,24 +279,6 @@ func _on_retry_wave() -> void:
 		_ui_host.call("menu_retry_wave")
 
 
-func _on_slider_changed(v: float, key: String, spin: SpinBox) -> void:
-	if _syncing:
-		return
-	_syncing = true
-	spin.value = v
-	_syncing = false
-	PhysicsSettings.set_value(key, v)
-
-
-func _on_spin_changed(v: float, key: String, slider: HSlider) -> void:
-	if _syncing:
-		return
-	_syncing = true
-	slider.value = v
-	_syncing = false
-	PhysicsSettings.set_value(key, v)
-
-
 func _on_row_reset(key: String) -> void:
 	PhysicsSettings.reset(key)
 	_refresh_row(key)
@@ -247,12 +293,8 @@ func _on_reset_all() -> void:
 func _refresh_row(key: String) -> void:
 	if not _rows.has(key):
 		return
-	_syncing = true
-	var v: float = PhysicsSettings.get_value(key)
-	var row: Dictionary = _rows[key]
-	(row.slider as HSlider).value = v
-	(row.spin as SpinBox).value = v
-	_syncing = false
+	var edit: LineEdit = _rows[key].edit as LineEdit
+	edit.text = PhysicsSettings.display_value(key)
 
 
 func is_open() -> bool:
@@ -275,16 +317,14 @@ func btn_retry() -> Button:
 	return _btn_retry
 
 
-func spinbox_for_key(key: String) -> SpinBox:
+func lineedit_for_key(key: String) -> LineEdit:
 	if not _rows.has(key):
 		return null
-	return _rows[key].spin as SpinBox
+	return _rows[key].edit as LineEdit
 
 
-func slider_for_key(key: String) -> HSlider:
-	if not _rows.has(key):
-		return null
-	return _rows[key].slider as HSlider
+func physics_vbox() -> VBoxContainer:
+	return _physics_vbox
 
 
 func set_settings_path(path: String) -> void:
@@ -310,6 +350,7 @@ func open() -> void:
 func close() -> void:
 	if not _open:
 		return
+	_commit_all_fields()
 	_open = false
 	visible = false
 	var vp := get_viewport()

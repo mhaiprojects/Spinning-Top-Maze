@@ -1,7 +1,7 @@
 class_name SpinningTop
 extends RigidBody2D
 ## Top-down spinning top: tilt force, spin power, wall bounce loss.
-## The art is a side-profile top (handle up, pointy tip down at TIP_LOCAL).
+## The art is a side-profile top (handle up, pointy tip down at tip_local()).
 ## Seen from above, the body's 2D angular_velocity is the spin about the top's
 ## own vertical axis (kept for wall contacts). The node therefore rotates, so
 ## _draw counter-rotates the profile art to keep it upright on its tip (it used
@@ -22,13 +22,10 @@ const HIT_VEL_SCALE := 0.6
 const HIT_COOLDOWN_MS := 150
 const STEER_FORCE := 480.0
 const MAX_LINEAR_SPEED := 520.0
-## 30% smaller than the original 46 px; art and collision both scale from it.
 const BASE_RADIUS := 46.0
-const RADIUS := BASE_RADIUS * 0.7
 const TRAIL_JUMP := 100.0
 const TRAIL_LEN := 18
 const FALL_ANIM := 1.0
-const TIP_LOCAL := Vector2(0, RADIUS * 0.8)
 
 var spin_power: float = 100.0
 var _falling := false
@@ -48,6 +45,7 @@ var _dbg_tick := 0.0
 var _lean := Vector2.ZERO
 var _precess_phase := 0.0
 var _settings_rev := -1
+var _circle_shape: CircleShape2D
 
 
 func _ready() -> void:
@@ -62,9 +60,9 @@ func _ready() -> void:
 	contact_monitor = true
 	max_contacts_reported = 8
 	var shape := CollisionShape2D.new()
-	var circle := CircleShape2D.new()
-	circle.radius = RADIUS
-	shape.shape = circle
+	_circle_shape = CircleShape2D.new()
+	_circle_shape.radius = radius()
+	shape.shape = _circle_shape
 	add_child(shape)
 	_trail_line = Line2D.new()
 	_trail_line.width = 7.0
@@ -102,7 +100,29 @@ func _ready() -> void:
 	add_child(_spark_flash)
 	z_index = 10
 	_sync_physics_tunables()
+	_apply_top_size()
 	set_run_active(false)
+
+
+func stored_size_scale() -> float:
+	return PhysicsSettings.get_value("top_size_scale")
+
+
+func radius() -> float:
+	var s: float = stored_size_scale()
+	if not is_finite(s) or s <= 0.0:
+		return BASE_RADIUS * 0.000001
+	return BASE_RADIUS * s
+
+
+func _apply_top_size() -> void:
+	var r: float = radius()
+	if _circle_shape:
+		_circle_shape.radius = r
+	if _trail_line:
+		var ref_r: float = BASE_RADIUS * 0.5
+		_trail_line.width = 7.0 * maxf(r / ref_r, 0.05)
+	queue_redraw()
 
 
 func configure_for_wave(wave: int) -> void:
@@ -201,7 +221,13 @@ func sync_physics_state() -> void:
 	_sync_physics_body()
 
 
+func refresh_size_from_settings() -> void:
+	_settings_rev = -1
+	_sync_physics_tunables()
+
+
 func _physics_process(delta: float) -> void:
+	_sync_physics_tunables()
 	if _fall_kind == FallKind.GOAL:
 		_advance_goal_fall(delta)
 		return
@@ -213,7 +239,6 @@ func _physics_process(delta: float) -> void:
 	if _fall_kind == FallKind.NONE and freeze:
 		freeze = false
 		sleeping = false
-	_sync_physics_tunables()
 	var decay_mult: float = PhysicsSettings.get_value("spin_decay_mult")
 	spin_power = maxf(0.0, spin_power - _decay_rate * decay_mult * delta)
 	power_changed.emit(spin_power)
@@ -308,6 +333,7 @@ func _sync_physics_tunables() -> void:
 	_settings_rev = rev
 	var ld: float = PhysicsSettings.get_value("linear_damp")
 	linear_damp = ld if is_finite(ld) else 2.2
+	_apply_top_size()
 
 
 func lean_vector() -> Vector2:
@@ -330,7 +356,7 @@ func visual_tilt() -> float:
 
 
 func tip_local() -> Vector2:
-	return TIP_LOCAL
+	return Vector2(0, radius() * 0.8)
 
 
 ## Local draw transform of the top's art (counter-rotated, tilted about the tip).
@@ -338,8 +364,9 @@ func visual_transform() -> Transform2D:
 	var pose: Dictionary = _visual_pose()
 	var body_rot: float = pose.rot
 	var body_scale: Vector2 = pose.scale
-	var tip: Vector2 = (pose.off as Vector2) + TIP_LOCAL
-	var pivot_origin: Vector2 = tip - (TIP_LOCAL * body_scale).rotated(body_rot)
+	var tip_l: Vector2 = tip_local()
+	var tip: Vector2 = (pose.off as Vector2) + tip_l
+	var pivot_origin: Vector2 = tip - (tip_l * body_scale).rotated(body_rot)
 	return Transform2D(-rotation, Vector2.ZERO) * Transform2D(body_rot, body_scale, 0.0, pivot_origin)
 
 
@@ -492,7 +519,7 @@ func _visual_pose() -> Dictionary:
 	if lean_max_rad > 0.001:
 		lean_ratio = clampf(_lean.length() / lean_max_rad, 0.0, 1.0)
 	var lean_dir: Vector2 = _lean.normalized() if _lean.length_squared() > 0.0001 else Vector2.ZERO
-	var lean_offset: Vector2 = lean_dir * lean_ratio * RADIUS * 0.35
+	var lean_offset: Vector2 = lean_dir * lean_ratio * radius() * 0.35
 	var wobble: float = (1.0 - spin_power / 100.0) * 14.0 * sin(_wobble_phase)
 	# Bounded tilts around the tip: sideways lean, precession sway, low-spin wobble.
 	var body_rot: float = wobble * 0.025 + sin(_precess_phase) * lean_ratio * 0.12
@@ -518,7 +545,8 @@ func _draw() -> void:
 	var body_rot: float = pose.rot
 	var body_off: Vector2 = pose.off
 	var body_scale: Vector2 = pose.scale
-	var tip: Vector2 = body_off + TIP_LOCAL
+	var tip: Vector2 = body_off + tip_local()
+	var r: float = radius()
 	# Undo the body's physics spin so the profile stays upright on screen.
 	var counter := Transform2D(-rotation, Vector2.ZERO)
 	# Contact shadow under the tip, stretched toward the handle's lean.
@@ -526,7 +554,7 @@ func _draw() -> void:
 	draw_set_transform_matrix(
 		counter * Transform2D(0.0, Vector2(1.0 + spread, 0.32), 0.0, tip + Vector2(6.0 * signf(body_rot), 4))
 	)
-	draw_circle(Vector2.ZERO, RADIUS * 0.5, Color(0, 0, 0, 0.28))
+	draw_circle(Vector2.ZERO, r * 0.5, Color(0, 0, 0, 0.28))
 	# Rotate/scale about the tip so it stays planted on the floor.
 	draw_set_transform_matrix(visual_transform())
 	_draw_classic_body(rotation)
@@ -534,21 +562,22 @@ func _draw() -> void:
 
 
 func _draw_classic_body(spin_ang: float) -> void:
+	var r: float = radius()
 	var wood_a := Color(0.68, 0.34, 0.12)
 	var wood_b := Color(0.92, 0.58, 0.2)
 	var wood_c := Color(0.48, 0.24, 0.08)
 	var pts := PackedVector2Array([
-		Vector2(-RADIUS * 0.82, -RADIUS * 0.22),
-		Vector2(RADIUS * 0.82, -RADIUS * 0.22),
-		Vector2(RADIUS * 0.26, RADIUS * 0.48),
-		Vector2(0, RADIUS * 0.78),
-		Vector2(-RADIUS * 0.26, RADIUS * 0.48),
+		Vector2(-r * 0.82, -r * 0.22),
+		Vector2(r * 0.82, -r * 0.22),
+		Vector2(r * 0.26, r * 0.48),
+		Vector2(0, r * 0.78),
+		Vector2(-r * 0.26, r * 0.48),
 	])
 	draw_colored_polygon(pts, wood_a)
 	for band_i in 5:
-		var by: float = lerpf(-RADIUS * 0.15, RADIUS * 0.55, float(band_i) / 5.0)
+		var by: float = lerpf(-r * 0.15, r * 0.55, float(band_i) / 5.0)
 		var col: Color = wood_b if band_i % 2 == 0 else wood_c
-		var hw: float = lerpf(RADIUS * 0.78, RADIUS * 0.22, float(band_i) / 5.0)
+		var hw: float = lerpf(r * 0.78, r * 0.22, float(band_i) / 5.0)
 		draw_line(Vector2(-hw, by), Vector2(hw, by), col, 5.0)
 	# Spin about the vertical tip-to-handle axis: stripes on the cone slide
 	# sideways and wrap round the back (only the front half is drawn).
@@ -560,19 +589,19 @@ func _draw_classic_body(spin_ang: float) -> void:
 			continue
 		var sx: float = sin(a)
 		draw_line(
-			Vector2(sx * RADIUS * 0.76, -RADIUS * 0.2),
-			Vector2(sx * RADIUS * 0.24, RADIUS * 0.47),
+			Vector2(sx * r * 0.76, -r * 0.2),
+			Vector2(sx * r * 0.24, r * 0.47),
 			Color(1, 0.92, 0.55, 0.15 + 0.35 * facing),
 			3.5
 		)
-	draw_rect(Rect2(-RADIUS * 0.1, -RADIUS * 0.78, RADIUS * 0.2, RADIUS * 0.45), Color(0.78, 0.5, 0.22))
-	draw_circle(Vector2(0, -RADIUS * 0.78), RADIUS * 0.14, Color(0.92, 0.9, 0.88))
-	draw_circle(Vector2(0, -RADIUS * 0.55), RADIUS * 0.22, Color(0.92, 0.88, 0.82))
-	draw_circle(Vector2(0, RADIUS * 0.72), RADIUS * 0.11, Color(0.5, 0.52, 0.58))
-	draw_circle(Vector2(0, RADIUS * 0.76), RADIUS * 0.045, Color(0.95, 0.96, 1.0))
+	draw_rect(Rect2(-r * 0.1, -r * 0.78, r * 0.2, r * 0.45), Color(0.78, 0.5, 0.22))
+	draw_circle(Vector2(0, -r * 0.78), r * 0.14, Color(0.92, 0.9, 0.88))
+	draw_circle(Vector2(0, -r * 0.55), r * 0.22, Color(0.92, 0.88, 0.82))
+	draw_circle(Vector2(0, r * 0.72), r * 0.11, Color(0.5, 0.52, 0.58))
+	draw_circle(Vector2(0, r * 0.76), r * 0.045, Color(0.95, 0.96, 1.0))
 	var hi := PackedVector2Array([
-		Vector2(-RADIUS * 0.4, -RADIUS * 0.12),
-		Vector2(-RADIUS * 0.05, -RADIUS * 0.28),
-		Vector2(-RADIUS * 0.25, RADIUS * 0.2),
+		Vector2(-r * 0.4, -r * 0.12),
+		Vector2(-r * 0.05, -r * 0.28),
+		Vector2(-r * 0.25, r * 0.2),
 	])
 	draw_colored_polygon(hi, Color(1, 1, 1, 0.22))

@@ -102,8 +102,9 @@ Opens a scrollable panel (game + physics). **Resume** or **Escape** closes, save
 | `wall_hit_slowdown` | Wall hit slowdown | 0.6 | 0.1–1 | Velocity kept after a wall hit |
 | `wall_hit_loss_mult` | Wall hit loss mult | 1.0 | 0–3 | Multiplier on wall power loss |
 | `fall_threshold` | Fall threshold (%) | 0 | 0–40 | Fall when power ≤ threshold (0 = off) |
+| `top_size_scale` | Top size (x original) | 0.5 | 0.25–1.5 | Multiplier on base top radius (46 px); scales collision and art |
 
-**Extreme values:** anything finite is stored and applied. Examples: negative `max_speed` or `max_speed` 0 → no speed cap; `high_scale` 0 → no target lean from tier shaping (minimal steer from lean spring); `lean_stiffness` 0 → lean does not chase input; huge `steer_force` still clamps forces/velocity to finite numbers at use sites. Invalid math (NaN/Inf) is dropped rather than snapping back to the old menu min/max.
+**Extreme values:** anything finite is stored and applied. Examples: negative `max_speed` or `max_speed` 0 → no speed cap; `high_scale` 0 → no target lean from tier shaping (minimal steer from lean spring); `lean_stiffness` 0 → lean does not chase input; huge `steer_force` still clamps forces/velocity to finite numbers at use sites. Invalid math (NaN/Inf) is dropped rather than snapping back to the old menu min/max. `top_size_scale` ≤ 0 is stored as typed but collision uses a tiny radius so physics stays valid.
 
 Code: `scripts/physics_settings.gd` (tunables + save/load), `scripts/top_physics.gd` (tiers / lean math), `scripts/physics_menu.gd` (UI).
 

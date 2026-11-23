@@ -6,7 +6,7 @@ const TopScript := preload("res://scripts/spinning_top.gd")
 
 const SECTION := "physics"
 const LS_KEY := "stm_physics"
-const PHYSICS_VERSION := 2
+const PHYSICS_VERSION := 3
 const VERSION_KEY := "physics_version"
 const MIGRATE_EPS := 0.001
 
@@ -156,6 +156,14 @@ static var DEFS: Array[Dictionary] = [
 		"max": 40.0,
 		"step": 1.0,
 	},
+	{
+		"key": "top_size_scale",
+		"label": "Top size (x original)",
+		"default": 0.5,
+		"min": 0.25,
+		"max": 1.5,
+		"step": 0.05,
+	},
 ]
 
 
@@ -300,14 +308,15 @@ static func _legacy_value_matches(key: String, v: float) -> bool:
 static func _apply_version_migration(saved_ver: int) -> bool:
 	if saved_ver >= PHYSICS_VERSION:
 		return false
-	var changed := false
-	for key in LEGACY_DEFAULTS.keys():
-		var cur: float = get_value(key)
-		if _legacy_value_matches(key, cur):
-			var nv: float = float(_def_for(key).default)
-			if not is_equal_approx(cur, nv):
-				_values[key] = nv
-				changed = true
+	var changed := true
+	if saved_ver < 2:
+		for key in LEGACY_DEFAULTS.keys():
+			var cur: float = get_value(key)
+			if _legacy_value_matches(key, cur):
+				var nv: float = float(_def_for(key).default)
+				if not is_equal_approx(cur, nv):
+					_values[key] = nv
+					changed = true
 	return changed
 
 

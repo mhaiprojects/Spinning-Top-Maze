@@ -59,6 +59,7 @@ func _run() -> void:
 	test_maze_no_straight_line()
 	print("== Top size ==")
 	await test_top_size()
+	test_top_size_scale_setting()
 	print("== Goal single tile, no pull ==")
 	await test_goal_single_tile_no_pull()
 	print("== Maze density curve ==")
@@ -214,24 +215,100 @@ func test_maze_no_straight_line() -> void:
 	check(a.room_walls == b.room_walls and a.goal_cell == b.goal_cell, "regeneration is deterministic per seed")
 
 
+func _top_collision_radius(top: SpinningTop) -> float:
+	for c in top.get_children():
+		if c is CollisionShape2D and (c as CollisionShape2D).shape is CircleShape2D:
+			return ((c as CollisionShape2D).shape as CircleShape2D).radius
+	return -1.0
+
+
 func test_top_size() -> void:
-	check(is_equal_approx(SpinningTop.RADIUS, 46.0 * 0.7), "top radius 30%% smaller (%.1f)" % SpinningTop.RADIUS)
+	PhysicsSettings.reset_all()
+	check(
+		is_equal_approx(PhysicsSettings.get_value("top_size_scale"), 0.5),
+		"top_size_scale default 0.5"
+	)
 	var top: SpinningTop = TopScript.new()
 	root.add_child(top)
 	await process_frame
-	var r := -1.0
-	for c in top.get_children():
-		if c is CollisionShape2D and (c as CollisionShape2D).shape is CircleShape2D:
-			r = ((c as CollisionShape2D).shape as CircleShape2D).radius
-	check(is_equal_approx(r, SpinningTop.RADIUS), "collision radius matches art radius (%.1f)" % r)
+	top.refresh_size_from_settings()
+	var r: float = _top_collision_radius(top)
+	var expect: float = TopScript.BASE_RADIUS * 0.5
+	check(is_equal_approx(top.radius(), expect), "top radius at default scale (%.1f)" % top.radius())
+	check(is_equal_approx(r, expect), "collision radius matches art radius (%.1f)" % r)
 	for wave in range(1, 11):
 		var dims: Vector2i = Maze.grid_dims_for_wave(wave)
 		var cell: float = minf(700.0 / float(dims.x), 912.0 / float(dims.y))
 		var opening: float = cell - 15.6
 		print("  fit w%d cell=%.0f opening=%.0f top_d=%.1f fits=%s" % [
-			wave, cell, opening, SpinningTop.RADIUS * 2.0, opening > SpinningTop.RADIUS * 2.0])
+			wave, cell, opening, top.radius() * 2.0, opening > top.radius() * 2.0])
 	top.queue_free()
 	await process_frame
+
+
+func test_top_size_scale_setting() -> void:
+	PhysicsSettings.reset_all()
+	var top: SpinningTop = TopScript.new()
+	root.add_child(top)
+	await physics_frame
+	check(is_equal_approx(top.radius(), 23.0), "default radius 46*0.5")
+	PhysicsSettings.set_value("top_size_scale", 0.9)
+	top.refresh_size_from_settings()
+	check(
+		is_equal_approx(_top_collision_radius(top), 46.0 * 0.9),
+		"live collision update for scale 0.9"
+	)
+	check(is_equal_approx(top.tip_local().y, top.radius() * 0.8), "tip scales with radius")
+	PhysicsSettings.set_value("top_size_scale", -2.0)
+	top.refresh_size_from_settings()
+	check(
+		PhysicsSettings.get_value("top_size_scale") == -2.0,
+		"negative top_size_scale stored without clamp"
+	)
+	check(
+		top.radius() <= TopScript.BASE_RADIUS * 0.00001 + 0.001,
+		"degenerate scale uses tiny collision radius"
+	)
+	var path := SETTINGS_TEST + ".top_size"
+	if FileAccess.file_exists(path):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	PhysicsSettings.set_value("top_size_scale", 1.1)
+	PhysicsSettings.save_to_path(path)
+	PhysicsSettings.reset_all()
+	PhysicsSettings.load_from_path(path)
+	check(
+		is_equal_approx(PhysicsSettings.get_value("top_size_scale"), 1.1),
+		"top_size_scale save/load round trip"
+	)
+	top.refresh_size_from_settings()
+	check(
+		is_equal_approx(_top_collision_radius(top), 46.0 * 1.1),
+		"loaded scale applies to collision"
+	)
+	var mig := path + ".v2"
+	if FileAccess.file_exists(mig):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(mig))
+	var cfg := ConfigFile.new()
+	cfg.set_value("physics", "physics_version", 2)
+	cfg.set_value("physics", "steer_force", 500.0)
+	cfg.save(mig)
+	PhysicsSettings.reset_all()
+	PhysicsSettings.load_from_path(mig)
+	check(
+		is_equal_approx(PhysicsSettings.get_value("top_size_scale"), 0.5),
+		"physics v2 without top_size_scale migrates to 0.5"
+	)
+	check(
+		int(UserSettings.load_config(mig).get_value("physics", "physics_version", 0))
+		== PhysicsSettings.PHYSICS_VERSION,
+		"v2 migration bumps physics_version"
+	)
+	for p in [path, mig]:
+		if FileAccess.file_exists(p):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(p))
+	top.queue_free()
+	await process_frame
+	PhysicsSettings.reset_all()
 
 
 func test_goal_single_tile_no_pull() -> void:
@@ -266,7 +343,7 @@ func test_goal_single_tile_no_pull() -> void:
 	var gc: Vector2i = maze.maze_data.goal_cell
 	var near: Vector2 = cell_c2
 	if not maze.maze_data.room_walls[gc.y][gc.x][Maze.W_S]:
-		near = Vector2(g.get_center().x, g.end.y + SpinningTop.RADIUS * 0.6)
+		near = Vector2(g.get_center().x, g.end.y + top.radius() * 0.6)
 	top.reset_top(near, 95.0)
 	top.set_run_active(true)
 	main.set("phase", MainScript.Phase.RUN)
@@ -485,9 +562,9 @@ func test_spin_axis_upright() -> void:
 	check(advanced > 30.0, "physics spin advances and drives stripes (%.1f rad)" % advanced)
 	check(max_art < 0.6, "art stays upright on screen despite body spin (max %.3f rad)" % max_art)
 	check(max_tilt > 0.05, "lean tilts the top around its tip (%.3f rad)" % max_tilt)
-	check(top.tip_local().y > SpinningTop.RADIUS * 0.5, "pointy tip is the bottom pivot")
+	check(top.tip_local().y > top.radius() * 0.5, "pointy tip is the bottom pivot")
 	check(
-		max_tip_drift <= SpinningTop.RADIUS * 0.4,
+		max_tip_drift <= top.radius() * 0.4,
 		"drawn tip stays planted below the top while it spins (max drift %.1f px)" % max_tip_drift
 	)
 	top.queue_free()
@@ -1349,6 +1426,10 @@ func test_physics_defaults() -> void:
 		is_equal_approx(PhysicsSettings.get_value("lean_max_deg"), 45.0),
 		"lean_max_deg default is 45.0"
 	)
+	check(
+		is_equal_approx(PhysicsSettings.get_value("top_size_scale"), 0.5),
+		"top_size_scale default is 0.5"
+	)
 	for d in PhysicsSettings.DEFS:
 		var dv: float = float(d.default)
 		check(is_finite(dv), "default %s is finite" % d.key)
@@ -1407,16 +1488,21 @@ func test_physics_settings_migration() -> void:
 	if FileAccess.file_exists(migrate_path):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(migrate_path))
 	cfg = ConfigFile.new()
-	cfg.set_value("physics", "physics_version", PhysicsSettings.PHYSICS_VERSION)
+	cfg.set_value("physics", "physics_version", 2)
 	cfg.set_value("physics", "tilt_response", 2.5)
 	cfg.set_value("physics", "tilt_sensitivity", 1.0)
 	cfg.set_value("physics", "lean_max_deg", 30.0)
+	cfg.set_value("physics", "top_size_scale", 0.75)
 	cfg.save(migrate_path)
 	PhysicsSettings.reset_all()
 	PhysicsSettings.load_from_path(migrate_path)
 	check(
 		is_equal_approx(PhysicsSettings.get_value("tilt_sensitivity"), 1.0),
 		"version-2 file keeps saved tilt_sensitivity 1.0"
+	)
+	check(
+		is_equal_approx(PhysicsSettings.get_value("top_size_scale"), 0.75),
+		"version-2 file keeps saved top_size_scale"
 	)
 	check(
 		is_equal_approx(PhysicsSettings.get_value("tilt_response"), 2.5),

@@ -261,8 +261,7 @@ func _compute_steer_target() -> Vector2:
 				_drag_active and not _steer_blocked
 			)
 		InputModes.Mode.TILT:
-			var oriented: Vector2 = _raw_tilt
-			base = InputModes.steer_tilt(_raw_tilt, _cal_offset, oriented)
+			base = InputModes.steer_tilt(_raw_tilt, _cal_offset)
 	return base
 
 
@@ -394,12 +393,13 @@ func _poll_native_accel() -> void:
 	if a == Vector3.ZERO:
 		return
 	var sens: float = PhysicsSettings.get_value("tilt_sensitivity")
-	var mapped: Vector2 = InputModes.map_accel_tilt(Vector2(a.x, a.y), sens)
+	var ang: float = InputModes.native_screen_rotation_deg()
+	var screen: Vector2 = InputModes.device_accel_to_screen_steer(Vector2(a.x, a.y), ang)
+	var mapped: Vector2 = screen * sens
+	if mapped.length() > 1.0:
+		mapped = mapped.normalized()
 	if mapped.length() > 0.001:
-		_raw_tilt = InputModes.rotate_for_screen(
-			mapped,
-			float(DisplayServer.screen_get_orientation())
-		)
+		_raw_tilt = mapped
 		_tilt_live = true
 
 
@@ -409,12 +409,41 @@ func _install_web_tilt() -> void:
 	var js := """
 	(function(){
 	  if (window.stmTilt) return;
-	  window.stmTilt = { beta: 0, gamma: 0, ax: 0, ay: 0, ok: false, denied: false };
-	  function upd(b,g){ window.stmTilt.beta = b||0; window.stmTilt.gamma = g||0; window.stmTilt.ok = true; }
+	  window.stmTilt = { beta: 0, gamma: 0, ax: 0, ay: 0, ang: 0, ok: false, denied: false };
+	  function screenAngle(){
+	    var a = 0;
+	    try {
+	      if (window.screen && window.screen.orientation && typeof screen.orientation.angle === 'number')
+	        a = screen.orientation.angle;
+	      else if (typeof window.orientation === 'number')
+	        a = window.orientation;
+	    } catch(e) {}
+	    return ((a % 360) + 360) % 360;
+	  }
+	  function isAppleTilt(){
+	    var ua = navigator.userAgent || '';
+	    if (/iPad|iPhone|iPod/.test(ua)) return true;
+	    if (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) return true;
+	    return false;
+	  }
+	  function normalizeAccelToAndroid(ax, ay){
+	    if (isAppleTilt()) return { ax: -ax, ay: -ay };
+	    return { ax: ax, ay: ay };
+	  }
+	  function upd(b,g){
+	    window.stmTilt.beta = b || 0;
+	    window.stmTilt.gamma = g || 0;
+	    window.stmTilt.ang = screenAngle();
+	    window.stmTilt.ok = true;
+	  }
 	  window.addEventListener('deviceorientation', function(e){ upd(e.beta, e.gamma); }, true);
 	  window.addEventListener('devicemotion', function(e){
 	    var a = e.accelerationIncludingGravity;
-	    if (a) { window.stmTilt.ax = a.x||0; window.stmTilt.ay = a.y||0; }
+	    if (a) {
+	      var n = normalizeAccelToAndroid(a.x||0, a.y||0);
+	      window.stmTilt.ax = n.ax; window.stmTilt.ay = n.ay;
+	      window.stmTilt.ang = screenAngle();
+	    }
 	  }, true);
 	  window.stmRequestTilt = function(){
 	    try {
@@ -455,7 +484,7 @@ func request_web_permission() -> void:
 
 func _poll_web_tilt() -> void:
 	var s: String = JavaScriptBridge.eval(
-		"(function(){var t=window.stmTilt||{};return JSON.stringify({b:t.beta,g:t.gamma,ax:t.ax,ay:t.ay,ok:!!t.ok,denied:!!t.denied});})();",
+		"(function(){var t=window.stmTilt||{};return JSON.stringify({b:t.beta,g:t.gamma,ax:t.ax,ay:t.ay,ang:t.ang||0,ok:!!t.ok,denied:!!t.denied});})();",
 		true
 	)
 	if s.is_empty():
@@ -469,23 +498,25 @@ func _poll_web_tilt() -> void:
 		return
 	var sens: float = PhysicsSettings.get_value("tilt_sensitivity")
 	var full: float = PhysicsSettings.get_value("tilt_full_scale_deg")
+	var ang: float = float(d.get("ang", 0.0))
 	var mapped := Vector2.ZERO
 	if absf(float(d.get("gamma", 0.0))) > 0.01 or absf(float(d.get("beta", 0.0))) > 0.01:
-		mapped = InputModes.map_device_tilt(
-			Vector2(float(d.get("gamma", 0.0)), float(d.get("beta", 0.0))),
-			full,
-			sens
+		var scr: Vector2 = InputModes.device_angles_to_screen_steer(
+			float(d.get("gamma", 0.0)),
+			float(d.get("beta", 0.0)),
+			ang
 		)
+		mapped = InputModes.map_device_tilt(scr, full, sens)
 	elif absf(float(d.get("ax", 0.0))) > 0.01:
-		mapped = InputModes.map_accel_tilt(
+		var screen: Vector2 = InputModes.device_accel_to_screen_steer(
 			Vector2(float(d.get("ax", 0.0)), float(d.get("ay", 0.0))),
-			sens
+			ang
 		)
+		mapped = screen * sens
+		if mapped.length() > 1.0:
+			mapped = mapped.normalized()
 	if mapped.length() > 0.01:
-		_raw_tilt = InputModes.rotate_for_screen(
-			mapped,
-			float(DisplayServer.screen_get_orientation())
-		)
+		_raw_tilt = mapped
 		_tilt_live = true
 
 

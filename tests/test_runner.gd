@@ -71,6 +71,7 @@ func _run() -> void:
 	print("== Input modes ==")
 	test_input_mode_logic()
 	test_input_vectors()
+	test_tilt_sign_mapping()
 	test_mode_save_load()
 	print("== Play backgrounds ==")
 	test_play_backgrounds()
@@ -527,14 +528,61 @@ func test_input_vectors() -> void:
 	check(is_equal_approx(d.length(), 1.0), "drag clamped to 1")
 	check(InputModes.steer_drag(Vector2(50, 0), Vector2(0, 0), false) == Vector2.ZERO, "drag zero when released")
 	var raw := Vector2(0.5, 0.0)
-	var t: Vector2 = InputModes.steer_tilt(raw, Vector2(0.1, 0.0), raw)
+	var t: Vector2 = InputModes.steer_tilt(raw, Vector2(0.1, 0.0))
 	check(t.length() > 0.0, "tilt subtracts calibration")
-	check(t.x < 0.0, "positive raw tilt x steers left (invert)")
+	check(t.x > 0.0, "positive raw tilt x steers right")
 	var raw_neg := Vector2(-0.5, 0.0)
-	var t2: Vector2 = InputModes.steer_tilt(raw_neg, Vector2.ZERO, raw_neg)
-	check(t2.x > 0.0, "negative raw tilt x steers right (invert)")
-	var rot: Vector2 = InputModes.rotate_for_screen(Vector2(1, 0), 90.0)
-	check(absf(rot.y) > 0.9, "tilt orientation rotation")
+	var t2: Vector2 = InputModes.steer_tilt(raw_neg, Vector2.ZERO)
+	check(t2.x < 0.0, "negative raw tilt x steers left")
+	var rot: Vector2 = InputModes.rotate_for_screen(Vector2(0.0, 1.0), 90.0)
+	check(rot.x > 0.9 and absf(rot.y) < 0.1, "device +y at 90 maps to screen +x (right edge down)")
+
+
+func test_tilt_sign_mapping() -> void:
+	var full: float = 35.0
+	var sens: float = 1.0
+	var tip: float = 18.0
+	for ang in [0, 90, 180, 270]:
+		var a := float(ang)
+		var d_right: Vector2 = InputModes.device_vector_from_screen_tip(tip, 0.0, a)
+		var s_right: Vector2 = InputModes.tilt_steer_pipeline(
+			d_right.x, d_right.y, a, Vector2.ZERO, full, sens
+		)
+		check(s_right.x > 0.05 and absf(s_right.y) < 0.35, "screen-right down angle %d => +x (%.2f,%.2f)" % [ang, s_right.x, s_right.y])
+		var d_left: Vector2 = InputModes.device_vector_from_screen_tip(-tip, 0.0, a)
+		var s_left: Vector2 = InputModes.tilt_steer_pipeline(
+			d_left.x, d_left.y, a, Vector2.ZERO, full, sens
+		)
+		check(s_left.x < -0.05, "screen-left down angle %d => -x" % ang)
+		var d_top_away: Vector2 = InputModes.device_vector_from_screen_tip(0.0, -tip, a)
+		var s_up: Vector2 = InputModes.tilt_steer_pipeline(
+			d_top_away.x, d_top_away.y, a, Vector2.ZERO, full, sens
+		)
+		check(s_up.y < -0.05 and absf(s_up.x) < 0.35, "screen-top away angle %d => -y" % ang)
+		var d_top_raise: Vector2 = InputModes.device_vector_from_screen_tip(0.0, tip, a)
+		var s_down: Vector2 = InputModes.tilt_steer_pipeline(
+			d_top_raise.x, d_top_raise.y, a, Vector2.ZERO, full, sens
+		)
+		check(s_down.y > 0.05, "screen-top raised angle %d => +y" % ang)
+		var d_off: Vector2 = InputModes.device_vector_from_screen_tip(8.0, -6.0, a)
+		var cal: Vector2 = InputModes.map_device_tilt(
+			InputModes.device_angles_to_screen_steer(d_off.x, d_off.y, a),
+			full,
+			sens
+		)
+		var zeroed: Vector2 = InputModes.tilt_steer_pipeline(
+			d_off.x, d_off.y, a, cal, full, sens
+		)
+		check(zeroed.length() < 0.02, "calibration cancels offset at angle %d" % ang)
+	var r90: Vector2 = InputModes.device_vector_to_screen_steer(Vector2(1.0, 0.0), 90.0)
+	check(is_equal_approx(r90.x, 0.0) and is_equal_approx(r90.y, -1.0), "rotation 90: (d.x,d.y)->(d.y,-d.x)")
+	var accel_android: Vector2 = InputModes.tilt_steer_from_accel_pipeline(
+		Vector2(-3.0, 0.0), 0.0, Vector2.ZERO, sens
+	)
+	check(accel_android.x > 0.05, "Android ax=-3 portrait right-edge-down => +steer.x")
+	var g_hi: Vector2 = InputModes.map_device_tilt(Vector2(10.0, 0.0), full, sens)
+	var g_lo: Vector2 = InputModes.map_device_tilt(Vector2(40.0, 0.0), full, sens)
+	check(g_hi.x > 0.0 and g_lo.x > g_hi.x, "map_device_tilt preserves gamma magnitude")
 
 
 func test_mode_save_load() -> void:

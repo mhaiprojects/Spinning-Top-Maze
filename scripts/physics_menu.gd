@@ -269,11 +269,13 @@ func refresh_game_rows() -> void:
 	if tin == null:
 		return
 	var mode_name := "Mouse"
-	if tin.has_method("status_text"):
+	if tin.has_method("mode_label_for_settings"):
+		mode_name = str(tin.call("mode_label_for_settings"))
+	elif tin.has_method("status_text"):
 		var st: String = str(tin.call("status_text"))
 		if st.begins_with("Input: "):
 			mode_name = st.split(" ")[1].trim_suffix("(on)").trim_suffix("(denied)")
-	mode_name = mode_name.split("(")[0].strip_edges()
+			mode_name = mode_name.split("(")[0].strip_edges()
 	_btn_mode.text = "Input: %s [M]" % mode_name
 	var bg_name := "Tabletop"
 	if tin.has_method("background_name"):

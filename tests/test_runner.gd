@@ -78,6 +78,8 @@ func _run() -> void:
 	test_input_vectors()
 	test_tilt_sign_mapping()
 	test_mode_save_load()
+	test_input_auto_pick()
+	test_input_mode_explicit_migration()
 	print("== Play backgrounds ==")
 	test_play_backgrounds()
 	await test_play_background_settings()
@@ -675,10 +677,97 @@ func test_tilt_sign_mapping() -> void:
 	check(g_hi.x > 0.0 and g_lo.x > g_hi.x, "map_device_tilt preserves gamma magnitude")
 
 
+func test_input_auto_pick() -> void:
+	check(
+		InputModes.auto_pick_mode({"touch": false}) == InputModes.Mode.MOUSE,
+		"auto desktop mouse"
+	)
+	check(
+		InputModes.auto_pick_mode({"touch": true, "tilt_available": false}) == InputModes.Mode.DRAG,
+		"auto touch no tilt drag"
+	)
+	check(
+		InputModes.auto_pick_mode({
+			"touch": true,
+			"is_web": true,
+			"web_has_orientation": true,
+			"web_tilt_data": true,
+		}) == InputModes.Mode.TILT,
+		"auto web tilt with data"
+	)
+	check(
+		InputModes.auto_pick_mode({
+			"touch": true,
+			"is_web": true,
+			"web_has_orientation": true,
+			"web_tilt_denied": true,
+		}) == InputModes.Mode.DRAG,
+		"auto web tilt denied drag"
+	)
+	check(
+		InputModes.auto_pick_mode({
+			"touch": true,
+			"is_web": true,
+			"web_has_motion": true,
+			"web_tilt_data": false,
+		}) == InputModes.Mode.DRAG,
+		"auto web no data drag"
+	)
+	check(
+		InputModes.auto_pick_mode({"touch": true, "native_mobile_accel": true}) == InputModes.Mode.TILT,
+		"auto native accel tilt"
+	)
+	check(not InputModes.tilt_available_for_auto({"touch": false, "native_mobile_accel": true}), "tilt needs touch")
+
+
+func test_input_mode_explicit_migration() -> void:
+	_clear_settings_test()
+	check(not UserSettings.load_mode_explicit(SETTINGS_TEST), "empty settings implicit")
+	var cfg := ConfigFile.new()
+	cfg.set_value("input", "mode", InputModes.Mode.KEYBOARD)
+	cfg.save(SETTINGS_TEST)
+	check(UserSettings.load_mode_explicit(SETTINGS_TEST), "legacy mode-only save is explicit")
+	cfg.set_value("input", "mode_explicit", false)
+	cfg.save(SETTINGS_TEST)
+	check(not UserSettings.load_mode_explicit(SETTINGS_TEST), "mode_explicit false honoured")
+	check(
+		InputModes.load_mode(SETTINGS_TEST) == InputModes.Mode.KEYBOARD,
+		"mode still loads with explicit false"
+	)
+	InputModes.save_mode(SETTINGS_TEST, InputModes.Mode.TILT)
+	check(UserSettings.load_mode_explicit(SETTINGS_TEST), "save_mode marks explicit")
+	var tilt: Node = TiltScript.new()
+	tilt.call("set_settings_path", SETTINGS_TEST)
+	root.add_child(tilt)
+	await process_frame
+	check(int(tilt.call("selected_mode")) == InputModes.Mode.TILT, "explicit saved mode restored")
+	check(bool(tilt.call("mode_explicit")), "explicit flag on tilt_input")
+	tilt.call("set_mode", InputModes.Mode.TILT)
+	await process_frame
+	tilt.call("_apply_fallback", "Tilt unavailable — using Drag")
+	await process_frame
+	check(bool(tilt.call("mode_explicit")), "tilt fallback keeps explicit choice")
+	check(int(tilt.call("selected_mode")) == InputModes.Mode.TILT, "selected stays tilt after fallback")
+	_clear_settings_test()
+	var tin2: Node = TiltScript.new()
+	tin2.call("set_settings_path", SETTINGS_TEST)
+	root.add_child(tin2)
+	await process_frame
+	check(not bool(tin2.call("mode_explicit")), "fresh install auto implicit")
+	check(
+		int(tin2.call("selected_mode")) == InputModes.Mode.MOUSE,
+		"fresh desktop auto mouse"
+	)
+	tin2.queue_free()
+	tilt.queue_free()
+	await process_frame
+
+
 func test_mode_save_load() -> void:
 	_clear_settings_test()
 	check(InputModes.save_mode(SETTINGS_TEST, InputModes.Mode.DRAG), "save input mode")
 	check(InputModes.load_mode(SETTINGS_TEST) == InputModes.Mode.DRAG, "load input mode round-trip")
+	check(UserSettings.load_mode_explicit(SETTINGS_TEST), "saved mode is explicit")
 	var tilt: Node = TiltScript.new()
 	tilt.call("set_settings_path", SETTINGS_TEST)
 	root.add_child(tilt)

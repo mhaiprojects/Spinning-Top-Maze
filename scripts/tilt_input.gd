@@ -4,8 +4,15 @@ extends Node
 const PlayBg := preload("res://scripts/play_background.gd")
 
 const TILT_TIMEOUT_SEC := 1.5
+const AUTO_PROBE_SEC := 0.65
 
 var _settings_path := "user://settings.cfg"
+var _mode_explicit := false
+var _auto_probing := false
+var _auto_probe_left := 0.0
+var _web_tilt_data_seen := false
+var _web_has_orientation := false
+var _web_has_motion := false
 var _selected_mode: int = InputModes.Mode.MOUSE
 var _effective_mode: int = InputModes.Mode.MOUSE
 var _smooth := Vector2.ZERO
@@ -41,11 +48,11 @@ var _smooth_target := Vector2.ZERO
 
 func _ready() -> void:
 	_load_calibration()
+	if OS.has_feature("web"):
+		_install_web_tilt()
 	_load_mode()
 	_load_background()
 	PhysicsSettings.load_from_path(_settings_path)
-	if OS.has_feature("web"):
-		_install_web_tilt()
 	if _selected_mode == InputModes.Mode.TILT:
 		_begin_tilt_watch()
 
@@ -62,17 +69,77 @@ func settings_path() -> String:
 
 
 func _load_mode() -> void:
-	var saved: int = InputModes.load_mode(_settings_path)
-	if saved >= 0:
-		_set_selected_mode(saved, false)
-	else:
-		var touch: bool = InputModes.is_touch_device()
-		var sensor: bool = InputModes.native_accel_available()
-		_set_selected_mode(InputModes.default_mode(touch, sensor), false)
+	_mode_explicit = UserSettings.load_mode_explicit(_settings_path)
+	if _mode_explicit:
+		var saved: int = InputModes.load_mode(_settings_path)
+		if saved >= 0:
+			_apply_mode(saved, false)
+			return
+	_start_auto_detect()
 
 
 func _save_mode() -> void:
-	InputModes.save_mode(_settings_path, _selected_mode)
+	UserSettings.save_input_mode_full(_settings_path, _selected_mode, _mode_explicit)
+
+
+func mode_explicit() -> bool:
+	return _mode_explicit
+
+
+func _start_auto_detect() -> void:
+	_mode_explicit = false
+	_web_tilt_data_seen = false
+	if OS.has_feature("web"):
+		_query_web_sensor_caps()
+	if _should_auto_probe():
+		_auto_probing = true
+		_auto_probe_left = AUTO_PROBE_SEC
+		_apply_mode(InputModes.auto_pick_mode(_auto_context(false)), false)
+	else:
+		_apply_mode(InputModes.auto_pick_mode(_auto_context(_native_tilt_data_now())), false)
+
+
+func _should_auto_probe() -> bool:
+	return InputModes.is_touch_device() and OS.has_feature("web")
+
+
+func _native_tilt_data_now() -> bool:
+	return InputModes.native_accel_live()
+
+
+func _auto_context(web_data: bool) -> Dictionary:
+	return {
+		"touch": InputModes.is_touch_device(),
+		"is_web": OS.has_feature("web"),
+		"native_mobile_accel": _native_tilt_data_now(),
+		"web_has_orientation": _web_has_orientation,
+		"web_has_motion": _web_has_motion,
+		"web_tilt_data": web_data or _web_tilt_data_seen,
+		"web_tilt_denied": _tilt_denied,
+	}
+
+
+func _query_web_sensor_caps() -> void:
+	if not OS.has_feature("web") or not _web_installed:
+		return
+	var s: String = JavaScriptBridge.eval(
+		"(function(){var o=typeof DeviceOrientationEvent!=='undefined';"
+		+ "var m=typeof DeviceMotionEvent!=='undefined';"
+		+ "return JSON.stringify({o:o,m:m});})();",
+		true
+	)
+	if s.is_empty():
+		return
+	var d: Variant = JSON.parse_string(s)
+	if typeof(d) != TYPE_DICTIONARY:
+		return
+	_web_has_orientation = bool(d.get("o", false))
+	_web_has_motion = bool(d.get("m", false))
+
+
+func _finish_auto_probe() -> void:
+	_auto_probing = false
+	_apply_mode(InputModes.auto_pick_mode(_auto_context(true)), false)
 
 
 func _load_background() -> void:
@@ -115,16 +182,22 @@ func effective_mode() -> int:
 
 
 func cycle_mode() -> void:
-	_set_selected_mode(InputModes.next_mode(_selected_mode), true)
+	_commit_explicit_mode(InputModes.next_mode(_selected_mode))
 
 
 func set_mode(mode: int) -> void:
 	if not InputModes.ORDER.has(mode):
 		return
-	_set_selected_mode(mode, true)
+	_commit_explicit_mode(mode)
 
 
-func _set_selected_mode(mode: int, persist: bool) -> void:
+func _commit_explicit_mode(mode: int) -> void:
+	_mode_explicit = true
+	_auto_probing = false
+	_apply_mode(mode, true)
+
+
+func _apply_mode(mode: int, persist: bool) -> void:
 	_selected_mode = mode
 	_effective_mode = mode
 	_fallback_msg = ""
@@ -146,6 +219,10 @@ func _begin_tilt_watch() -> void:
 
 
 func _process(delta: float) -> void:
+	if _auto_probing:
+		_auto_probe_left -= delta
+		if _web_tilt_data_seen or _tilt_denied or _auto_probe_left <= 0.0:
+			_finish_auto_probe()
 	if _selected_mode == InputModes.Mode.TILT or _effective_mode == InputModes.Mode.TILT:
 		_poll_tilt_sources(delta)
 		_maybe_tilt_fallback(delta)
@@ -277,8 +354,15 @@ func drag_active() -> bool:
 	return _drag_active
 
 
+func mode_label_for_settings() -> String:
+	var base: String = InputModes.mode_name(_selected_mode)
+	if not _mode_explicit:
+		return "%s (Auto)" % base
+	return base
+
+
 func status_text() -> String:
-	var label: String = "Input: %s" % InputModes.mode_name(_selected_mode)
+	var label: String = "Input: %s" % mode_label_for_settings()
 	if _selected_mode == InputModes.Mode.TILT and _fallback_msg != "":
 		label += " (steer: %s)" % InputModes.mode_name(_effective_mode)
 	elif _selected_mode == InputModes.Mode.TILT and _tilt_denied:
@@ -311,7 +395,19 @@ func _is_emulated_mouse_from_touch() -> bool:
 	return Time.get_ticks_msec() - _last_touch_ms < 80
 
 
+func _maybe_request_ios_tilt_on_gesture(event: InputEvent) -> void:
+	if _mode_explicit or not OS.has_feature("web"):
+		return
+	var gesture: bool = (
+		(event is InputEventScreenTouch and event.pressed)
+		or (event is InputEventMouseButton and event.pressed)
+	)
+	if gesture:
+		request_web_permission()
+
+
 func handle_input(event: InputEvent) -> void:
+	_maybe_request_ios_tilt_on_gesture(event)
 	if _steer_blocked or _effective_mode != InputModes.Mode.DRAG:
 		return
 
@@ -522,6 +618,7 @@ func _poll_web_tilt() -> void:
 	if mapped.length() > 0.01:
 		_raw_tilt = mapped
 		_tilt_live = true
+		_web_tilt_data_seen = true
 
 
 func _notify_drag_overlay(on: bool) -> void:

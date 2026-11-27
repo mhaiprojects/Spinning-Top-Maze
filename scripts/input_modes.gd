@@ -169,15 +169,48 @@ static func is_touch_device() -> bool:
 static func native_accel_available() -> bool:
 	if OS.has_feature("web"):
 		return true
-	return Input.get_accelerometer() != Vector3.ZERO or OS.has_feature("mobile")
+	return native_accel_live() or OS.has_feature("mobile")
+
+
+static func native_accel_live() -> bool:
+	if OS.has_feature("web"):
+		return false
+	return Input.get_accelerometer().length_squared() > 0.01
+
+
+## Pure auto-pick from probe context (unit-testable). Keys: touch, tilt_available,
+## or web/native sub-keys via tilt_available_for_auto().
+static func tilt_available_for_auto(ctx: Dictionary) -> bool:
+	if ctx.has("tilt_available"):
+		return bool(ctx["tilt_available"])
+	var touch: bool = bool(ctx.get("touch", false))
+	if not touch:
+		return false
+	if bool(ctx.get("native_mobile_accel", false)):
+		return true
+	if not bool(ctx.get("is_web", false)):
+		return false
+	if bool(ctx.get("web_tilt_denied", false)):
+		return false
+	var has_api: bool = bool(ctx.get("web_has_orientation", false)) or bool(ctx.get("web_has_motion", false))
+	if not has_api:
+		return false
+	return bool(ctx.get("web_tilt_data", false))
+
+
+static func auto_pick_mode(ctx: Dictionary) -> int:
+	if tilt_available_for_auto(ctx):
+		return Mode.TILT
+	if bool(ctx.get("touch", false)):
+		return Mode.DRAG
+	return Mode.MOUSE
 
 
 static func default_mode(touch: bool, sensor_likely: bool) -> int:
-	if touch and sensor_likely:
-		return Mode.TILT
-	if touch:
-		return Mode.DRAG
-	return Mode.MOUSE
+	return auto_pick_mode({
+		"touch": touch,
+		"tilt_available": touch and sensor_likely,
+	})
 
 
 static func tilt_fallback_mode(touch: bool) -> int:

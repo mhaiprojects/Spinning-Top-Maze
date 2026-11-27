@@ -47,7 +47,7 @@ godot --headless --path . --script res://tests/difficulty_table.gd
 | **Drag** | Touch or hold left mouse and drag (virtual stick); vector clamped to length 1 | Phones, tablets, touch laptops |
 | **Tilt** | Device orientation / accelerometer (web: JS `deviceorientation` / `devicemotion`; native: `Input.get_accelerometer()`) | Phones / tablets |
 
-**Switch mode:** **Settings** (gear, top-right) → **Input** row, or press **M** / **Tab** to cycle Mouse → Keyboard → Drag → Tilt. Saved in `user://settings.cfg`.
+**Switch mode:** **Settings** (gear, top-right) → **Input** row, or press **M** / **Tab** to cycle Mouse → Keyboard → Drag → Tilt. An explicit choice is saved (`input/mode` + `input/mode_explicit=true`) in `user://settings.cfg` (Web: `localStorage` `stm_input`) and overrides auto-detect on later launches.
 
 ### Play-area boards
 
@@ -62,7 +62,9 @@ The maze floor and wall colours follow a selectable **board** theme (procedural 
 
 **Switch board:** **Settings** → **Board** row, or press **B** to cycle Tabletop → Chopping → Planks → Stone. Applies immediately (no wave restart). Stored as `[visual] background` in the same settings file (merge save).
 
-**Defaults (no saved file):** **Tilt** on mobile / touch Web when sensors are likely available; **Drag** on touch without sensors; **Mouse** on desktop.
+**First launch (auto):** If you have never picked a mode (`mode_explicit` absent/false), the game auto-picks each session: **Tilt** on touch when sensors actually work (native: live accelerometer; Web: `DeviceOrientation`/`DeviceMotion` APIs present **and** events deliver data within ~0.65 s — on iOS, permission is requested on the first tap); else **Drag** on touch; else **Mouse** on desktop. The Settings row shows the effective mode with **(Auto)**. **Keyboard** arrows/WASD always work regardless.
+
+**Migration:** Older saves that only stored `input/mode` (from **M** / Settings before auto-detect) are treated as **explicit** so your prior choice is kept.
 
 **Tilt fallback:** If Tilt is selected but permission is denied or no sensor events arrive within ~1.5 s, a HUD message appears (*“Tilt unavailable — using Drag/Mouse”*). The label still shows **Tilt**; steering uses **Drag** (touch) or **Mouse** (desktop).
 

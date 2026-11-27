@@ -47,7 +47,7 @@ godot --headless --path . --script res://tests/difficulty_table.gd
 | **Drag** | Touch or hold left mouse and drag (virtual stick); vector clamped to length 1 | Phones, tablets, touch laptops |
 | **Tilt** | Device orientation / accelerometer (web: JS `deviceorientation` / `devicemotion`; native: `Input.get_accelerometer()`) | Phones / tablets |
 
-**Switch mode:** **Settings** (gear, top-right) → **Input** row, or press **M** / **Tab** to cycle Mouse → Keyboard → Drag → Tilt. An explicit choice is saved (`input/mode` + `input/mode_explicit=true`) in `user://settings.cfg` (Web: `localStorage` `stm_input`) and overrides auto-detect on later launches.
+**Switch mode:** Bottom-left **input** button (short label, **·A** when auto-detect is active) opens a picker: **Mouse**, **Keyboard**, **Finger drag**, **Tilt** (disabled when unavailable), or **Auto** (clears the explicit flag and re-runs session auto-detect). Same persistence as **Settings** (gear, top-right) → **Input** row, or **M** / **Tab** to cycle. An explicit choice is saved (`input/mode` + `input/mode_explicit=true`) in `user://settings.cfg` (Web: `localStorage` `stm_input`) and overrides auto-detect on later launches. While the picker is open, steering is blocked and the game is paused (like the gear menu).
 
 ### Play-area boards
 

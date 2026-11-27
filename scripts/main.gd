@@ -106,6 +106,8 @@ func _update_steer_block() -> void:
 		blocked = true
 	if _ui.has_method("physics_settings_menu_open") and _ui.physics_settings_menu_open():
 		blocked = true
+	if _ui.has_method("input_picker_open") and _ui.input_picker_open():
+		blocked = true
 	tin.call("set_steer_blocked", blocked)
 
 
@@ -153,8 +155,11 @@ func _apply_play_layout(_hud_only: bool) -> void:
 			var measured: float = _ui.hud_band_height()
 			if measured > top_h + 0.5:
 				top_h = measured
-				_play_rect.position.y = top_h
-				_play_rect.size.y = maxf(80.0, vp.size.y - top_h - bot_h)
+				_play_rect.position = Vector2(margin, top_h)
+				_play_rect.size = Vector2(
+					maxf(40.0, vp.size.x - margin * 2.0),
+					maxf(80.0, vp.size.y - top_h - bot_h)
+				)
 				_ui.set_layout_rects(vp.size, _play_rect, top_h, bot_h)
 	if not _hud_only:
 		_generate_maze_data_only()
@@ -184,10 +189,15 @@ func _launch_bar_rect(vp: Rect2) -> Rect2:
 	var bot_h: float = float(ViewportLayout.scaled_heights(vp.size).bottom)
 	var s: float = float(ViewportLayout.scaled_heights(vp.size).scale)
 	var inset: float = maxf(12.0, 16.0 * s)
-	var bar := Rect2(
+	var bar_left: float = maxf(
 		_play_rect.position.x + inset,
+		ViewportLayout.launch_bar_left_clearance(vp.size)
+	)
+	var bar_right: float = _play_rect.position.x + _play_rect.size.x - inset
+	var bar := Rect2(
+		bar_left,
 		maxf(_play_rect.end.y + 4.0, vp.size.y - bot_h + 8.0 * s),
-		maxf(40.0, _play_rect.size.x - inset * 2.0),
+		maxf(40.0, bar_right - bar_left),
 		maxf(36.0, minf(bot_h - 16.0 * s, vp.size.y - (_play_rect.end.y + 8.0)))
 	)
 	if bar.end.y > vp.size.y:
@@ -367,6 +377,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	if _ui.has_method("handle_overlay_input") and _ui.handle_overlay_input(event):
 		return
 	if _ui.has_method("physics_settings_menu_open") and _ui.physics_settings_menu_open():
+		return
+	if _ui.has_method("input_picker_open") and _ui.input_picker_open():
 		return
 	if _gui_editing_text():
 		return

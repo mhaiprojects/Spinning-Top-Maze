@@ -6,6 +6,7 @@ const FONT_SZ := 22
 const VT := preload("res://scripts/visual_theme.gd")
 const ViewportLayout := preload("res://scripts/viewport_layout.gd")
 const DifficultyStars := preload("res://scripts/difficulty_stars.gd")
+const InputPickerMenu := preload("res://scripts/input_picker_menu.gd")
 
 var _vp_size := Vector2(720, 1280)
 var _play_rect := Rect2()
@@ -19,6 +20,7 @@ var _lbl_tilt: Label
 var _lbl_msg: Label
 var _btn_gear: Button
 var _physics_menu: PhysicsMenu
+var _input_picker: InputPickerMenu
 var _overlay: Control
 var _overlay_card: PanelContainer
 var _overlay_lbl: Label
@@ -48,12 +50,17 @@ func _ready() -> void:
 	if tin_path and tin_path.has_method("settings_path"):
 		_physics_menu.set_settings_path(str(tin_path.call("settings_path")))
 	add_child(_physics_menu)
+	_input_picker = InputPickerMenu.new()
+	_input_picker.set_ui_host(self)
+	add_child(_input_picker)
 
 
-func set_layout_rects(vp: Vector2, play: Rect2, top_h: float, _bot_h: float) -> void:
+func set_layout_rects(vp: Vector2, play: Rect2, top_h: float, bot_h: float) -> void:
 	_vp_size = vp
 	_play_rect = play
 	_hud_height = top_h
+	if _input_picker:
+		_input_picker.layout_chrome(vp, bot_h)
 	var ui_s: float = ViewportLayout.ui_scale(vp)
 	if _overlay_card:
 		var card_w: float = minf(320.0 * ui_s, maxf(200.0, vp.x - 24.0))
@@ -99,6 +106,8 @@ func hud_screen_rect() -> Rect2:
 func consumes_steering_at(screen_pos: Vector2) -> bool:
 	if _overlay.visible:
 		return _overlay_btn.get_global_rect().has_point(screen_pos) or _overlay_card.get_global_rect().has_point(screen_pos)
+	if _input_picker and _input_picker.consumes_point(screen_pos):
+		return true
 	return hud_screen_rect().has_point(screen_pos)
 
 
@@ -292,6 +301,20 @@ func physics_settings_menu_open() -> bool:
 	return _physics_menu != null and _physics_menu.is_open()
 
 
+func input_picker_open() -> bool:
+	return _input_picker != null and _input_picker.is_open()
+
+
+func input_picker_node() -> InputPickerMenu:
+	return _input_picker
+
+
+func input_picker_button_rect() -> Rect2:
+	if _input_picker == null:
+		return Rect2()
+	return _input_picker.button_screen_rect()
+
+
 func physics_menu_node() -> PhysicsMenu:
 	return _physics_menu
 
@@ -330,7 +353,7 @@ func _on_hud_band_resized() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if handle_overlay_input(event):
 		return
-	if physics_settings_menu_open():
+	if physics_settings_menu_open() or input_picker_open():
 		return
 	var fo: Control = get_viewport().gui_get_focus_owner()
 	if fo is LineEdit:
@@ -429,6 +452,8 @@ func _cycle_mode() -> void:
 
 func _on_mode_changed(_selected: int, _effective: int) -> void:
 	_refresh_settings_menu()
+	if _input_picker:
+		_input_picker.refresh_chrome()
 
 
 func _on_fallback_message(text: String) -> void:

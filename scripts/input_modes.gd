@@ -133,6 +133,17 @@ static func tilt_steer_from_accel_pipeline(
 	return steer_tilt(oriented, cal_offset)
 
 
+static func mode_short_label(mode: int) -> String:
+	match mode:
+		Mode.KEYBOARD:
+			return "Key"
+		Mode.DRAG:
+			return "Drag"
+		Mode.TILT:
+			return "Tilt"
+	return "Mse"
+
+
 static func mode_name(mode: int) -> String:
 	match mode:
 		Mode.MOUSE:

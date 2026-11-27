@@ -191,6 +191,28 @@ func set_mode(mode: int) -> void:
 	_commit_explicit_mode(mode)
 
 
+func apply_auto_detect() -> void:
+	_mode_explicit = false
+	_start_auto_detect()
+	UserSettings.save_input_mode_full(_settings_path, _selected_mode, false)
+
+
+func pick_mode_from_ui(mode: int) -> void:
+	if not InputModes.ORDER.has(mode):
+		return
+	_commit_explicit_mode(mode)
+	if mode == InputModes.Mode.TILT and OS.has_feature("web"):
+		request_web_permission()
+
+
+func tilt_picker_enabled() -> bool:
+	if not InputModes.is_touch_device() and not OS.has_feature("mobile"):
+		return false
+	if OS.has_feature("web"):
+		return (_web_has_orientation or _web_has_motion) and not _tilt_denied
+	return InputModes.native_accel_live() or OS.has_feature("mobile")
+
+
 func _commit_explicit_mode(mode: int) -> void:
 	_mode_explicit = true
 	_auto_probing = false

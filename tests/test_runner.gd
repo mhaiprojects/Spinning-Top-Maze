@@ -13,6 +13,7 @@ const UserSettings := preload("res://scripts/user_settings.gd")
 const PhysicsSettings := preload("res://scripts/physics_settings.gd")
 const TopPhysics := preload("res://scripts/top_physics.gd")
 const PhysicsMenu := preload("res://scripts/physics_menu.gd")
+const InputPickerMenu := preload("res://scripts/input_picker_menu.gd")
 
 const SETTINGS_TEST := "user://test_stm_settings.cfg"
 
@@ -124,6 +125,7 @@ func _run() -> void:
 	await test_hud_play_layout()
 	test_web_export_shell_preset()
 	await test_viewport_layouts()
+	await test_input_picker_menu()
 	print("\nRESULT: %d passed, %d failed" % [passed, failed])
 
 
@@ -428,6 +430,7 @@ func test_all_scripts_load() -> void:
 		"res://scripts/top_physics.gd",
 		"res://scripts/physics_menu.gd",
 		"res://scripts/viewport_layout.gd",
+		"res://scripts/input_picker_menu.gd",
 	]
 	for p in paths:
 		var res: Resource = load(p)
@@ -1973,6 +1976,86 @@ func test_physics_settings_menu() -> void:
 	PhysicsSettings.reset_all()
 
 
+func _rects_disjoint(a: Rect2, b: Rect2, pad: float = 2.0) -> bool:
+	var ag: Rect2 = a.grow(pad)
+	var bg: Rect2 = b.grow(pad)
+	return not ag.intersects(bg)
+
+
+func test_input_picker_menu() -> void:
+	PhysicsSettings.reset_all()
+	_clear_settings_test()
+	var scene: PackedScene = load("res://scenes/main.tscn")
+	var inst := scene.instantiate()
+	root.add_child(inst)
+	for i in 24:
+		await process_frame
+	var ui: Node = inst.get_node("UI")
+	var tin: Node = root.get_node_or_null("TiltInput")
+	var picker: InputPickerMenu = ui.call("input_picker_node") as InputPickerMenu
+	var vp: Rect2 = inst.get_viewport().get_visible_rect()
+	var btn_r: Rect2 = ui.call("input_picker_button_rect") as Rect2
+	check(picker != null and btn_r.size.x >= 48.0, "input picker button exists with touch target")
+	check(_rect_inside_viewport(btn_r, vp), "input picker button in viewport")
+	check(btn_r.position.x < vp.size.x * 0.35, "input picker anchored bottom-left")
+	picker.open()
+	for i in 6:
+		await process_frame
+	check(picker.is_open(), "input picker popup opens")
+	check(bool(tin.call("steer_blocked")), "steering blocked while picker open")
+	check(paused, "tree paused while picker open")
+	var pop_r: Rect2 = picker.popup_screen_rect()
+	check(_rect_inside_viewport(pop_r, vp), "picker popup in viewport")
+	check(picker.consumes_point(btn_r.get_center()), "picker button consumes steering point")
+	picker.call("_on_pick", InputModes.Mode.MOUSE, false)
+	await process_frame
+	check(not picker.is_open(), "picker closes after selection")
+	check(not paused, "tree unpaused after picker close")
+	check(int(tin.call("selected_mode")) == InputModes.Mode.MOUSE, "picker mouse explicit")
+	check(bool(tin.call("mode_explicit")), "picker mouse sets explicit")
+	check(
+		UserSettings.load_input_mode(SETTINGS_TEST) == InputModes.Mode.MOUSE
+		and UserSettings.load_mode_explicit(SETTINGS_TEST),
+		"picker mouse saved to test settings"
+	)
+	picker.call("_on_pick", InputModes.Mode.DRAG, false)
+	await process_frame
+	check(int(tin.call("selected_mode")) == InputModes.Mode.DRAG, "picker drag explicit")
+	picker.call("_on_pick", InputModes.Mode.KEYBOARD, false)
+	await process_frame
+	check(int(tin.call("selected_mode")) == InputModes.Mode.KEYBOARD, "picker keyboard explicit")
+	picker.open()
+	await process_frame
+	var esc := InputEventKey.new()
+	esc.pressed = true
+	esc.echo = false
+	esc.keycode = KEY_ESCAPE
+	picker._unhandled_input(esc)
+	await process_frame
+	check(not picker.is_open(), "picker closes on Escape")
+	check(not paused, "tree unpaused after Escape close")
+	picker.open()
+	await process_frame
+	picker.call("_on_pick", -1, false)
+	await process_frame
+	check(not bool(tin.call("mode_explicit")), "picker Auto clears explicit")
+	check(not UserSettings.load_mode_explicit(SETTINGS_TEST), "Auto saved implicit to test settings")
+	check(not tin.call("tilt_picker_enabled"), "tilt unavailable on headless desktop")
+	picker.open()
+	await process_frame
+	picker._refresh_popup_rows()
+	var tilt_btn: Button = null
+	for c in picker._option_vbox.get_children():
+		if c is Button and bool(c.get_meta("tilt_row", false)):
+			tilt_btn = c as Button
+			break
+	check(tilt_btn != null and tilt_btn.disabled, "tilt row disabled when unavailable")
+	picker.close()
+	await process_frame
+	inst.queue_free()
+	await process_frame
+
+
 func _rect_inside_viewport(inner: Rect2, vp: Rect2, pad: float = 3.0) -> bool:
 	return (
 		inner.position.x >= vp.position.x - pad
@@ -2035,8 +2118,26 @@ func test_viewport_layouts() -> void:
 			and is_equal_approx(play.size.y, maze_local.size.y),
 			"maze play area matches layout at %dx%d" % [sz.x, sz.y]
 		)
+		var pick_btn: Rect2 = ui.call("input_picker_button_rect") as Rect2
+		var picker: InputPickerMenu = ui.call("input_picker_node") as InputPickerMenu
+		check(_rect_inside_viewport(pick_btn, vp), "picker btn inside viewport %dx%d" % [sz.x, sz.y])
 		var menu: PhysicsMenu = ui.call("physics_menu_node") as PhysicsMenu
 		var gear_btn: Button = ui.call("gear_button") as Button
+		var gear_r: Rect2 = gear_btn.get_global_rect()
+		check(_rects_disjoint(pick_btn, gear_r), "picker btn disjoint gear %dx%d" % [sz.x, sz.y])
+		check(_rects_disjoint(pick_btn, hud), "picker btn disjoint HUD %dx%d" % [sz.x, sz.y])
+		check(_rects_disjoint(pick_btn, launch), "picker btn disjoint launch %dx%d" % [sz.x, sz.y])
+		check(_rects_disjoint(pick_btn, play), "picker btn disjoint play %dx%d" % [sz.x, sz.y])
+		picker.open()
+		for i in 8:
+			await process_frame
+		var pop_r: Rect2 = picker.popup_screen_rect()
+		check(_rect_inside_viewport(pop_r, vp), "picker popup inside viewport %dx%d" % [sz.x, sz.y])
+		check(_rects_disjoint(pop_r, gear_r), "picker popup disjoint gear %dx%d" % [sz.x, sz.y])
+		check(_rects_disjoint(pop_r, hud), "picker popup disjoint HUD %dx%d" % [sz.x, sz.y])
+		picker.close()
+		for i in 4:
+			await process_frame
 		gear_btn.pressed.emit()
 		for i in 8:
 			await process_frame
